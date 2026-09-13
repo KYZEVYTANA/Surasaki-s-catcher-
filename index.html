@@ -51,7 +51,7 @@ progress{width:100%;height:9px;margin:10px 0}
 </select>
 
 <div id="dictPanel" style="margin-top:12px">
-<div class="small">В комплекте словарь из 8&nbsp;816 10-буквенных записей CMU Pronouncing Dictionary, отфильтрованных до <code>a-z</code>. Это не «все слова английского языка», а готовый словарь кандидатов. Более крупные SCOWL/ESDB существуют, но их состав шире и включает редкие/именные формы.</div>
+<div class="small">В комплекте словарь из ~8&nbsp;800 10-буквенных записей (CMU, только a-z). При открытии через <code>file://</code> Safari/Chrome часто блокирует <code>fetch</code> — тогда просто выбери файл вручную в режиме «Свой список».</div>
 <button id="loadDict" style="margin-top:10px">Загрузить встроенный словарь</button>
 </div>
 
@@ -130,19 +130,21 @@ $("mode").onchange=()=>{
 $("loadDict").onclick=async()=>{
   try {
     const r=await fetch("english_10letter_dictionary.txt");
-    if(!r.ok) throw Error("Файл словаря не найден.");
+    if(!r.ok) throw Error("Файл словаря не найден (HTTP "+r.status+").");
     $("words").value=await r.text();
     $("mode").value="custom"; $("mode").dispatchEvent(new Event("change"));
-    log("Встроенный словарь загружен.");
+    log("Встроенный словарь загружен через fetch.");
   } catch(e) {
-    alert("Если index.html открыт напрямую и браузер блокирует fetch локального файла, выбери english_10letter_dictionary.txt через «Свой список».");
-    log(e.message);
+    log("fetch() не сработал: "+e.message);
+    alert("Офлайн / file:// — fetch заблокирован.\\n\\nИспользуй кнопку выбора файла ниже и укажи english_10letter_dictionary.txt вручную.");
+    $("mode").value="custom"; $("mode").dispatchEvent(new Event("change"));
+    setTimeout(()=>$("file").click(), 300);
   }
 };
 $("file").onchange=async e=>{const f=e.target.files[0];if(f){$("words").value=await f.text();log("Список загружен: "+f.name)}};
 
 function candidates(){
-  return [...new Set($("words").value.split(/\r?\n/).map(s=>s.trim().toLowerCase()).filter(s=>/^[a-z]{10}$/.test(s)))];
+  return [...new Set($("words").value.split(/\\r?\\n/).map(s=>s.trim().toLowerCase()).filter(s=>/^[a-z]{10}$/.test(s)))];
 }
 function indexToWord(n){
   let a=new Array(10);
@@ -152,21 +154,81 @@ function indexToWord(n){
 function makeWorker(){
   const src=`const B64=${JSON.stringify(WASM_B64)};
 let inst,mem,enc=new TextEncoder();
-function hx(s){let a=new Uint8Array(s.length/2);for(let i=0;i<a.length;i++)a[i]=parseInt(s.substr(i*2,2),16);return a}
-async function init(){let b=Uint8Array.from(atob(B64),c=>c.charCodeAt(0));inst=(await WebAssembly.instantiate(b.buffer,{})).instance;mem=new Uint8Array(inst.exports.memory.buffer)}
+async function init(){
+  postMessage({type:"status",message:"wasm-loading"});
+  let b=Uint8Array.from(atob(B64),c=>c.charCodeAt(0));
+  inst=(await WebAssembly.instantiate(b.buffer,{})).instance;
+  mem=new Uint8Array(inst.exports.memory.buffer);
+  postMessage({type:"status",message:"wasm-ready"});
+}
 function idxword(n){let a=new Array(10);for(let i=9;i>=0;i--){a[i]=String.fromCharCode(97+Number(n%26n));n=n/26n}return a.join("")}
-async function check(c, h){let e=inst.exports,cp=e.get_candidates_ptr();mem.set(enc.encode(c),cp);mem.set(Uint8Array.from(h.salt),e.get_salt_ptr());mem.set(Uint8Array.from(h.master),e.get_master_ptr());e.derive(0,h.rounds);let d=mem.slice(e.get_out_ptr(),e.get_out_ptr()+64);let key=await crypto.subtle.importKey("raw",d.slice(0,32),{name:"AES-CBC"},false,["decrypt"]);let iv=Uint8Array.from(h.master.slice(0,16));let ct=Uint8Array.from(h.master.slice(16,32));try{await crypto.subtle.decrypt({name:"AES-CBC",iv},key,ct);return true}catch(_){return false}}
-onmessage=async e=>{try{if(e.data.cmd==="start"){await init();let h=e.data.h;let n=BigInt(e.data.start),end=BigInt(e.data.end);let step=0n;while(n<=end){if(e.data.mode==="brute"){let c=idxword(n);if(await check(c,h)){postMessage({type:"found",candidate:c,index:n.toString()});return};step++;if(step%10n===0n)postMessage({type:"progress",index:n.toString(),count:step.toString(),candidate:c});n++}else{for(let i=0;i<e.data.list.length;i++){let c=e.data.list[i];if(await check(c,h)){postMessage({type:"found",candidate:c,index:i.toString()});return};step++;if(step%10n===0n)postMessage({type:"progress",index:i.toString(),count:step.toString(),candidate:c})}n=end+1n}postMessage({type:"done",count:step.toString(),last:(n-1n).toString()})}}catch(err){postMessage({type:"error",message:String(err)})}}`;
+async function check(c, h){
+  let e=inst.exports,cp=e.get_candidates_ptr();
+  mem.set(enc.encode(c),cp);
+  mem.set(Uint8Array.from(h.salt),e.get_salt_ptr());
+  mem.set(Uint8Array.from(h.master),e.get_master_ptr());
+  e.derive(0,h.rounds);
+  let d=mem.slice(e.get_out_ptr(),e.get_out_ptr()+64);
+  // Correct verification for $bitcoin$ (hashcat 11300):
+  // key = KDF[0:32], iv = KDF[32:48], full 32-byte CT.
+  // WebCrypto success (PKCS7) == last 16 plaintext bytes are 0x10.
+  let key=await crypto.subtle.importKey("raw",d.slice(0,32),{name:"AES-CBC"},false,["decrypt"]);
+  let iv=d.slice(32,48);
+  let ct=Uint8Array.from(h.master);
+  try{
+    let plain = await crypto.subtle.decrypt({name:"AES-CBC",iv},key,ct);
+    // Real match for 32-byte $bitcoin$ requires exactly 16 bytes of PKCS7 padding (0x10*16)
+    // → decrypted length must be 16. Any other valid pad length is a false positive.
+    return plain.byteLength === 16;
+  }catch(_){return false}
+}
+onmessage=async e=>{
+  try{
+    if(e.data.cmd==="start"){
+      postMessage({type:"status",message:"worker-started"});
+      await init();
+      let h=e.data.h;
+      let n=BigInt(e.data.start),end=BigInt(e.data.end);
+      let step=0n;
+      const progressEvery = e.data.mode==="brute" ? 20n : 8n;
+      while(n<=end){
+        if(e.data.mode==="brute"){
+          let c=idxword(n);
+          if(await check(c,h)){postMessage({type:"found",candidate:c,index:n.toString()});return}
+          step++;
+          if(step % progressEvery === 0n) postMessage({type:"progress",index:n.toString(),count:step.toString(),candidate:c});
+          n++;
+        }else{
+          for(let i=0;i<e.data.list.length;i++){
+            let c=e.data.list[i];
+            if(await check(c,h)){postMessage({type:"found",candidate:c,index:String(i)});return}
+            step++;
+            if(step % progressEvery === 0n) postMessage({type:"progress",index:String(i),count:step.toString(),candidate:c});
+          }
+          n=end+1n;
+        }
+      }
+      postMessage({type:"done",count:step.toString(),last:(n-1n).toString()});
+    }
+  }catch(err){postMessage({type:"error",message:String(err.stack||err)})}
+};`;
   return new Worker(URL.createObjectURL(new Blob([src],{type:"text/javascript"})));
 }
 function stopWorker(){if(worker){worker.terminate();worker=null}running=false;$("start").disabled=false;$("stop").disabled=true;$("resume").disabled=!checkpoint;}
-$("stop").onclick=()=>{if(worker){checkpoint=window._lastIndex;localStorage.setItem("surasaki_checkpoint",checkpoint??"");stopWorker();log("Остановлено. Checkpoint: "+checkpoint)}};
+$("stop").onclick=()=>{
+  if(worker){
+    checkpoint=window._lastIndex;
+    localStorage.setItem("surasaki_checkpoint",checkpoint??"");
+    stopWorker();
+    log("Остановлено. Checkpoint: "+checkpoint);
+  }
+};
 $("resume").onclick=()=>{if(checkpoint!==null) startRun(true)};
 async function startRun(resume=false){
   if(running)return;
   let h;try{h=hashInfo()}catch(e){alert(e.message);return}
   const m=$("mode").value;
-  let start,end,list=[];
+  let start,end,list=[], listOffset=0;
   if(m==="brute"){
     start=resume&&checkpoint!==null?BigInt(checkpoint)+1n:BigInt($("startIndex").value||0);
     end=BigInt($("endIndex").value||"141167095653375");
@@ -174,27 +236,46 @@ async function startRun(resume=false){
     total=end-start+1n;
   }else{
     list=candidates(); if(!list.length){alert("Нет кандидатов длиной 10 букв a-z.");return}
-    start=0n;end=BigInt(list.length-1);total=BigInt(list.length);
+    listOffset = (resume && checkpoint !== null) ? (Number(checkpoint)+1) : 0;
+    if(listOffset >= list.length){alert("Checkpoint уже в конце списка.");return}
+    list = list.slice(listOffset);
+    start=0n; end=BigInt(list.length-1); total=BigInt(list.length);
   }
   running=true; $("start").disabled=true;$("stop").disabled=false;$("resume").disabled=true;
   checked=0;$("count").textContent="0";$("total").textContent=total.toString();$("bar").value=0;$("result").textContent="";
-  worker=makeWorker(); window._lastIndex=start.toString();
+  window._listOffset = listOffset;
+  worker=makeWorker();
+  window._lastIndex = m==="brute" ? start.toString() : String(listOffset);
+  worker.onerror = (err)=>{ $("status").textContent="Worker error"; log("Worker error: "+(err.message||err)); stopWorker(); };
   worker.onmessage=e=>{
     const d=e.data;
+    if(d.type==="status"){
+      log(d.message);
+      if(d.message==="wasm-ready") $("status").textContent="WASM готов, начинаю проверку…";
+      return;
+    }
     if(d.type==="progress"){
-      window._lastIndex=d.index;checked=Number(d.count);$("count").textContent=checked.toLocaleString("ru-RU");
+      let idx = m==="brute" ? d.index : String(Number(d.index) + listOffset);
+      window._lastIndex=idx;
+      checked=Number(d.count);
+      $("count").textContent=checked.toLocaleString("ru-RU");
       if(m==="brute") $("bar").value=Math.min(1,Number(BigInt(d.index)-start+1n)/Number(total));
       else $("bar").value=Math.min(1,checked/Number(total));
-      $("status").textContent="Проверяется: "+d.candidate;
+      // update status only every ~50 progress messages to reduce layout thrashing
+      if(checked % 50 === 0 || m!=="brute") $("status").textContent="Проверяется: "+d.candidate;
+      checkpoint=idx;
+      if(checked % 20 === 0) localStorage.setItem("surasaki_checkpoint",idx);
     }else if(d.type==="found"){
-      checkpoint=d.index;localStorage.setItem("surasaki_checkpoint",d.index);
+      let idx = m==="brute" ? d.index : String(Number(d.index) + listOffset);
+      checkpoint=idx; localStorage.setItem("surasaki_checkpoint",idx);
       $("result").innerHTML=`<div class="ok">✓ ПАРОЛЬ НАЙДЕН</div><div style="font:20px ui-monospace,monospace;margin-top:5px">${d.candidate}</div>`;
-      $("status").textContent="Совпадение найдено.";log("СОВПАДЕНИЕ: "+d.candidate);stopWorker();
+      $("status").textContent="Совпадение найдено."; log("СОВПАДЕНИЕ: "+d.candidate); stopWorker();
     }else if(d.type==="done"){
-      checkpoint=d.last;localStorage.setItem("surasaki_checkpoint",d.last);
-      $("status").textContent="Задание завершено.";log("Завершено. Совпадения нет.");stopWorker();
+      let last = m==="brute" ? d.last : String(Number(d.last) + listOffset);
+      checkpoint=last; localStorage.setItem("surasaki_checkpoint",last);
+      $("status").textContent="Задание завершено."; log("Завершено. Совпадения нет."); stopWorker();
     }else if(d.type==="error"){
-      $("status").textContent="Ошибка.";log(d.message);stopWorker();
+      $("status").textContent="Ошибка."; log("ERROR: "+d.message); stopWorker();
     }
   };
   worker.postMessage({cmd:"start",h,start:start.toString(),end:end.toString(),mode:m,list});
