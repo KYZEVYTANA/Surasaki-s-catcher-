@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Surasaki’s Matcher v2</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",Arial,sans-serif;color:#f5f5f7;background:#09090b}
+*{box-sizing:border-box} body{margin:0;background:linear-gradient(160deg,#171719,#070708);min-height:100vh}
+main{max-width:780px;margin:auto;padding:20px 16px 44px}
+h1{font-size:28px;margin:5px 0 3px} .sub{color:#9b9b9f;margin-bottom:18px}
+.card{background:#1c1c1e;border:1px solid #303035;border-radius:18px;padding:16px;margin:12px 0;box-shadow:0 8px 30px #0004}
+label{display:block;color:#b9b9bd;font-size:13px;margin:0 0 7px}
+textarea,input,select{width:100%;background:#101012;color:#fff;border:1px solid #3a3a40;border-radius:12px;padding:12px;outline:none}
+textarea{min-height:105px;resize:vertical;font-family:ui-monospace,monospace;font-size:12px}
+input,select{font-size:15px}
+.row{display:flex;gap:9px;flex-wrap:wrap;margin-top:10px}
+button{font:inherit;border:0;border-radius:12px;padding:12px 15px;font-weight:750;background:#eee;color:#111}
+button.secondary{background:#303035;color:#fff} button.danger{background:#4b2020;color:#fff}
+button:disabled{opacity:.45}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px} .metric{background:#101012;border-radius:13px;padding:12px}
+.num{font-size:22px;font-weight:800} .muted{color:#98989d}
+progress{width:100%;height:9px;margin:10px 0}
+#log{white-space:pre-wrap;font:12px ui-monospace,monospace;color:#aaa;max-height:240px;overflow:auto}
+.ok{color:#7ee787;font-weight:800} .warn{color:#ffd166} .err{color:#ff7b72;font-weight:700}
+.small{font-size:12px;line-height:1.5;color:#8e8e93} code{font-family:ui-monospace,monospace}
+</style>
+</head>
+<body>
+<main>
+<h1>Surasaki’s Matcher v2</h1>
+<div class="sub">Локальное восстановление пароля Bitcoin Core • Safari / iPhone</div>
+
+<div class="card">
+<label>Bitcoin hash</label>
+<textarea id="hash" spellcheck="false">$bitcoin$64$f913fa9e5ea97dad615191c23af0f5ebdbe4693ddbea0903d9230832e7ae36c0$16$4cad32d55bbe6595$37167$2$00$2$00</textarea>
+<div class="row">
+<button id="parse">Проверить hash</button>
+</div>
+<div id="hashInfo" class="small" style="margin-top:9px"></div>
+</div>
+
+<div class="card">
+<label>Режим</label>
+<select id="mode">
+<option value="dict">Словарь 10-буквенных слов</option>
+<option value="brute">Brute-force: все 10 символов a-z</option>
+<option value="custom">Свой список</option>
+</select>
+
+<div id="dictPanel" style="margin-top:12px">
+<div class="small">В комплекте словарь из 8&nbsp;816 10-буквенных записей CMU Pronouncing Dictionary, отфильтрованных до <code>a-z</code>. Это не «все слова английского языка», а готовый словарь кандидатов. Более крупные SCOWL/ESDB существуют, но их состав шире и включает редкие/именные формы.</div>
+<button id="loadDict" style="margin-top:10px">Загрузить встроенный словарь</button>
+</div>
+
+<div id="customPanel" style="display:none;margin-top:12px">
+<label>Кандидаты — по одному в строке</label>
+<textarea id="words" spellcheck="false"></textarea>
+<input id="file" type="file" accept=".txt,text/plain" style="margin-top:9px">
+</div>
+
+<div id="brutePanel" style="display:none;margin-top:12px">
+<div class="grid">
+<div><label>Начало индекса</label><input id="startIndex" value="0" inputmode="numeric"></div>
+<div><label>Конец индекса</label><input id="endIndex" value="141167095653375" inputmode="numeric"></div>
+</div>
+<div class="small" style="margin-top:8px">Индексы соответствуют <code>aaaaaaaaaa</code> → <code>zzzzzzzzzz</code>. Полный диапазон содержит 26¹⁰ = 141&nbsp;167&nbsp;095&nbsp;653&nbsp;376 кандидатов. Кандидаты генерируются на лету и не сохраняются в TXT.</div>
+</div>
+</div>
+
+<div class="card">
+<div class="grid">
+<div class="metric"><div class="num" id="count">0</div><div class="muted">проверено</div></div>
+<div class="metric"><div class="num" id="total">0</div><div class="muted">в текущем задании</div></div>
+</div>
+<progress id="bar" value="0" max="1"></progress>
+<div id="status" class="muted">Готово.</div>
+<div class="row">
+<button id="start">▶ Запустить</button>
+<button id="stop" class="danger" disabled>■ Стоп</button>
+<button id="resume" class="secondary" disabled>Продолжить с checkpoint</button>
+</div>
+<div id="result" style="margin-top:12px"></div>
+</div>
+
+<div class="card">
+<label>Журнал</label>
+<div id="log"></div>
+</div>
+
+<div class="card small">
+<b>Офлайн:</b> после открытия страницы приложение не требует сети. Hash, кандидаты и найденный пароль остаются на устройстве.
+<br><br>
+<b>Важно:</b> полный brute-force 10 букв на iPhone практически непригоден по времени. Словарь имеет смысл запускать первым. Checkpoint сохраняет текущий индекс, чтобы можно было продолжить позже.
+</div>
+</main>
+
+<script>
+const WASM_B64 = "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AO7dgIAAQQAgBEIQiDwA7d2AgABBACAEQhiIPADs3YCAAEEAIARCIIg8AOvdgIAAQQAgBEIoiDwA6t2AgABBACAEQjCIPADp3YCAAEEAIARCOIg8AOjdgIAAQQAgA0IIiDwA5t2AgABBACADQhCIPADl3YCAAEEAIANCGIg8AOTdgIAAQQAgA0IgiDwA492AgABBACADQiiIPADi3YCAAEEAIANCMIg8AOHdgIAAQQAgA0I4iDwA4N2AgAAgAkGAB2okgICAgAALC4gFAQBBgAgLgAUirijXmC+KQs1l7yORRDdxLztN7M/7wLW824mBpdu16Ti1SPNbwlY5GdAFtvER8VmbTxmvpII/khiBbdrVXhyrQgIDo5iqB9i+b3BFAVuDEoyy5E6+hTEk4rT/1cN9DFVviXvydF2+crGWFjv+sd6ANRLHJacG3JuUJmnPdPGbwdJK8Z7BaZvk4yVPOIZHvu+11YyLxp3BD2WcrHfMoQwkdQIrWW8s6S2D5KZuqoR0StT7Qb3cqbBctVMRg9qI+Xar32buUlE+mBAytC1txjGoPyH7mMgnA7DkDu++x39Zv8KPqD3zC+DGJacKk0eRp9VvggPgUWPKBnBuDgpnKSkU/C/SRoUKtycmySZcOCEbLu0qxFr8bSxN37OVnRMNOFPeY6+LVHMKZaiydzy7Cmp25q7tRy7JwoE7NYIUhSxykmQD8Uyh6L+iATBCvEtmGqiRl/jQcItLwjC+VAajUWzHGFLv1hnoktEQqWVVJAaZ1iogcVeFNQ70uNG7MnCgahDI0NK4FsGkGVOrQVEIbDcemeuO30x3SCeoSJvhtbywNGNaycWzDBw5y4pB40qq2E5z42N3T8qcW6O4stbzby5o/LLvXe6Cj3RgLxdDb2OleHKr8KEUeMiE7DlkGggCx4woHmMj+v++kOm9gt7rbFCkFXnGsvej+b4rU3Lj8nhxxpxhJurOPifKB8LAIce4htEe6+DN1n3a6njRbu5/T331um8Xcqpn8AammMiixX1jCq4N+b4EmD8RG0ccEzULcRuEfQQj9XfbKJMkx0B7q8oyvL7JFQq+njxMDRCcxGcdQ7ZCPsu+1MVMKn5l/Jwpf1ns+tY6q2/LXxdYR0qMGURsAI4BBG5hbWUADQxyZWNvdmVyLndhc20BWAcABm1lbWNweQESZ2V0X2NhbmRpZGF0ZXNfcHRyAgxnZXRfc2FsdF9wdHIDDmdldF9tYXN0ZXJfcHRyBAtnZXRfb3V0X3B0cgUGZGVyaXZlBgZzaGE1MTIHEgEAD19fc3RhY2tfcG9pbnRlcgkKAQAHLnJvZGF0YQB/CXByb2R1Y2VycwEMcHJvY2Vzc2VkLWJ5AQVjbGFuZ18xNy4wLjAgKGh0dHBzOi8vZ2l0aHViLmNvbS9zd2lmdGxhbmcvbGx2bS1wcm9qZWN0LmdpdCAxMDk5OWI2ZDAzNGZlMzE4ZjNkNTZjODNiZGRiNjU3MjU5M2E4YmIwKQBJD3RhcmdldF9mZWF0dXJlcwQrCm11bHRpdmFsdWUrD211dGFibGUtZ2xvYmFscysPcmVmZXJlbmNlLXR5cGVzKwhzaWduLWV4dA==";
+const $=id=>document.getElementById(id);
+let worker=null, running=false, total=0, checked=0, checkpoint=null;
+
+function log(s){ $("log").textContent+=s+"\n"; $("log").scrollTop=$("log").scrollHeight; }
+function hex(s){ if(!/^[0-9a-f]+$/i.test(s)||s.length%2) throw Error("Некорректный hex"); let a=new Uint8Array(s.length/2); for(let i=0;i<a.length;i++)a[i]=parseInt(s.substr(i*2,2),16); return a; }
+function parseHash(){
+  const p=$("hash").value.trim().split("$");
+  if(p[1]!=="bitcoin"||p.length<10) throw Error("Нужен формат $bitcoin$...");
+  const ml=+p[2], master=hex(p[3]), sl=+p[4], salt=hex(p[5]), rounds=+p[6];
+  if(ml!==master.length*2 || master.length!==32) throw Error("Ожидается 32-байтный encrypted master key.");
+  if(sl!==salt.length*2 || salt.length!==8) throw Error("Ожидается 8-байтный salt.");
+  if(!Number.isInteger(rounds)||rounds<1) throw Error("Некорректное число итераций.");
+  return {master:Array.from(master),salt:Array.from(salt),rounds};
+}
+function hashInfo(){
+  const x=parseHash();
+  $("hashInfo").textContent=`OK • master ${x.master.length} байт • salt ${x.salt.length} байт • iterations ${x.rounds}`;
+  $("hashInfo").className="small ok";
+  return x;
+}
+$("parse").onclick=()=>{try{hashInfo();log("Hash OK.")}catch(e){$("hashInfo").textContent=e.message;$("hashInfo").className="small err";log("Hash: "+e.message)}};
+
+$("mode").onchange=()=>{
+  const m=$("mode").value;
+  $("dictPanel").style.display=m==="dict"?"block":"none";
+  $("customPanel").style.display=m==="custom"?"block":"none";
+  $("brutePanel").style.display=m==="brute"?"block":"none";
+};
+$("loadDict").onclick=async()=>{
+  try {
+    const r=await fetch("english_10letter_dictionary.txt");
+    if(!r.ok) throw Error("Файл словаря не найден.");
+    $("words").value=await r.text();
+    $("mode").value="custom"; $("mode").dispatchEvent(new Event("change"));
+    log("Встроенный словарь загружен.");
+  } catch(e) {
+    alert("Если index.html открыт напрямую и браузер блокирует fetch локального файла, выбери english_10letter_dictionary.txt через «Свой список».");
+    log(e.message);
+  }
+};
+$("file").onchange=async e=>{const f=e.target.files[0];if(f){$("words").value=await f.text();log("Список загружен: "+f.name)}};
+
+function candidates(){
+  return [...new Set($("words").value.split(/\r?\n/).map(s=>s.trim().toLowerCase()).filter(s=>/^[a-z]{10}$/.test(s)))];
+}
+function indexToWord(n){
+  let a=new Array(10);
+  for(let i=9;i>=0;i--){a[i]=String.fromCharCode(97+Number(n%26n));n=n/26n}
+  return a.join("");
+}
+function makeWorker(){
+  const src=`const B64=${JSON.stringify(WASM_B64)};
+let inst,mem,enc=new TextEncoder();
+function hx(s){let a=new Uint8Array(s.length/2);for(let i=0;i<a.length;i++)a[i]=parseInt(s.substr(i*2,2),16);return a}
+async function init(){let b=Uint8Array.from(atob(B64),c=>c.charCodeAt(0));inst=(await WebAssembly.instantiate(b.buffer,{})).instance;mem=new Uint8Array(inst.exports.memory.buffer)}
+function idxword(n){let a=new Array(10);for(let i=9;i>=0;i--){a[i]=String.fromCharCode(97+Number(n%26n));n=n/26n}return a.join("")}
+async function check(c, h){let e=inst.exports,cp=e.get_candidates_ptr();mem.set(enc.encode(c),cp);mem.set(Uint8Array.from(h.salt),e.get_salt_ptr());mem.set(Uint8Array.from(h.master),e.get_master_ptr());e.derive(0,h.rounds);let d=mem.slice(e.get_out_ptr(),e.get_out_ptr()+64);let key=await crypto.subtle.importKey("raw",d.slice(0,32),{name:"AES-CBC"},false,["decrypt"]);let iv=Uint8Array.from(h.master.slice(0,16));let ct=Uint8Array.from(h.master.slice(16,32));try{await crypto.subtle.decrypt({name:"AES-CBC",iv},key,ct);return true}catch(_){return false}}
+onmessage=async e=>{try{if(e.data.cmd==="start"){await init();let h=e.data.h;let n=BigInt(e.data.start),end=BigInt(e.data.end);let step=0n;while(n<=end){if(e.data.mode==="brute"){let c=idxword(n);if(await check(c,h)){postMessage({type:"found",candidate:c,index:n.toString()});return};step++;if(step%10n===0n)postMessage({type:"progress",index:n.toString(),count:step.toString(),candidate:c});n++}else{for(let i=0;i<e.data.list.length;i++){let c=e.data.list[i];if(await check(c,h)){postMessage({type:"found",candidate:c,index:i.toString()});return};step++;if(step%10n===0n)postMessage({type:"progress",index:i.toString(),count:step.toString(),candidate:c})}n=end+1n}postMessage({type:"done",count:step.toString(),last:(n-1n).toString()})}}catch(err){postMessage({type:"error",message:String(err)})}}`;
+  return new Worker(URL.createObjectURL(new Blob([src],{type:"text/javascript"})));
+}
+function stopWorker(){if(worker){worker.terminate();worker=null}running=false;$("start").disabled=false;$("stop").disabled=true;$("resume").disabled=!checkpoint;}
+$("stop").onclick=()=>{if(worker){checkpoint=window._lastIndex;localStorage.setItem("surasaki_checkpoint",checkpoint??"");stopWorker();log("Остановлено. Checkpoint: "+checkpoint)}};
+$("resume").onclick=()=>{if(checkpoint!==null) startRun(true)};
+async function startRun(resume=false){
+  if(running)return;
+  let h;try{h=hashInfo()}catch(e){alert(e.message);return}
+  const m=$("mode").value;
+  let start,end,list=[];
+  if(m==="brute"){
+    start=resume&&checkpoint!==null?BigInt(checkpoint)+1n:BigInt($("startIndex").value||0);
+    end=BigInt($("endIndex").value||"141167095653375");
+    if(start>end){alert("Start должен быть <= End");return}
+    total=end-start+1n;
+  }else{
+    list=candidates(); if(!list.length){alert("Нет кандидатов длиной 10 букв a-z.");return}
+    start=0n;end=BigInt(list.length-1);total=BigInt(list.length);
+  }
+  running=true; $("start").disabled=true;$("stop").disabled=false;$("resume").disabled=true;
+  checked=0;$("count").textContent="0";$("total").textContent=total.toString();$("bar").value=0;$("result").textContent="";
+  worker=makeWorker(); window._lastIndex=start.toString();
+  worker.onmessage=e=>{
+    const d=e.data;
+    if(d.type==="progress"){
+      window._lastIndex=d.index;checked=Number(d.count);$("count").textContent=checked.toLocaleString("ru-RU");
+      if(m==="brute") $("bar").value=Math.min(1,Number(BigInt(d.index)-start+1n)/Number(total));
+      else $("bar").value=Math.min(1,checked/Number(total));
+      $("status").textContent="Проверяется: "+d.candidate;
+    }else if(d.type==="found"){
+      checkpoint=d.index;localStorage.setItem("surasaki_checkpoint",d.index);
+      $("result").innerHTML=`<div class="ok">✓ ПАРОЛЬ НАЙДЕН</div><div style="font:20px ui-monospace,monospace;margin-top:5px">${d.candidate}</div>`;
+      $("status").textContent="Совпадение найдено.";log("СОВПАДЕНИЕ: "+d.candidate);stopWorker();
+    }else if(d.type==="done"){
+      checkpoint=d.last;localStorage.setItem("surasaki_checkpoint",d.last);
+      $("status").textContent="Задание завершено.";log("Завершено. Совпадения нет.");stopWorker();
+    }else if(d.type==="error"){
+      $("status").textContent="Ошибка.";log(d.message);stopWorker();
+    }
+  };
+  worker.postMessage({cmd:"start",h,start:start.toString(),end:end.toString(),mode:m,list});
+}
+$("start").onclick=()=>startRun(false);
+const saved=localStorage.getItem("surasaki_checkpoint"); if(saved){checkpoint=saved;$("resume").disabled=false;log("Найден сохранённый checkpoint: "+saved)}
+$("parse").click();
+</script>
+</body>
+</html>
