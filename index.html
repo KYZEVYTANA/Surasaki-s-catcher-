@@ -1280,7 +1280,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
       txCount,
       recordTypes,
       encryption: mkeys.length ? "master-key records detected" : (ckeyAs.length || ckeys.length ? "encrypted-key records detected" : "not detected"),
-      compatibility: (mkeys.length && ckeys.length && mkeys[0].method === 0) ? "supported existing legacy handler" : (mkeys.length || ckeys.length || ckeyAs.length ? "partially detected; crypto scheme/structure not fully supported" : "no supported encrypted-wallet structure detected")
+      compatibility: (mkeys.length === 1 && ckeys.length && mkeys[0].method === 0) ? "supported existing legacy handler" : (mkeys.length > 1 ? "manual mkey selection required" : (mkeys.length || ckeys.length || ckeyAs.length ? "partially detected; crypto scheme/structure not fully supported" : "no supported encrypted-wallet structure detected"))
     };
 
     if (!mkeys.length) {
@@ -1306,7 +1306,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
       "hdchain: " + analysis.hdchainCount + " • key: " + analysis.keyCount + " • keymeta: " + analysis.keyMetaCount,
       "Compatibility: " + analysis.compatibility
     ];
-    if (analysis.mkeyCount > 1) lines.push("⚠ Обнаружено несколько mkey; текущий crypto handler использует первый совместимый mkey.");
+    if (analysis.mkeyCount > 1) lines.push("⚠ Обнаружено несколько mkey. Автоматический выбор отключён: сначала выберите/укажите конкретный mkey, чтобы не проверять кошелёк с неверной master-key записью.");
     if (analysis.ckeyACount) lines.push("⚠ Обнаружен альтернативный тип encrypted-key записи ckeyA; отдельная криптографическая поддержка не включена.");
     if (!analysis.mkeyCount && !analysis.ckeyCount && !analysis.ckeyACount) lines.push("⚠ Зашифрованная структура wallet не обнаружена; encrypted-wallet verifier не запускается.");
     el.textContent=lines.join("\n");
@@ -1335,6 +1335,9 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
       renderWalletAnalysis(parsed.analysis);
       if (!parsed.mkey || !parsed.ckeys.length) {
         throw new Error("Формат распознан, но текущий encrypted-wallet verifier не поддерживает эту структуру.");
+      }
+      if (parsed.mkeys.length !== 1) {
+        throw new Error("Обнаружено несколько mkey (" + parsed.mkeys.length + "). Автоматический выбор отключён для предотвращения неверной привязки master key. Текущий verifier требует ровно одну выбранную mkey.");
       }
       const mk=parsed.mkey;
       const ck=parsed.ckeys[0];
