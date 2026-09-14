@@ -100,6 +100,15 @@ progress::-webkit-progress-value { background: linear-gradient(90deg,#5b9dff,#3d
   background: #2a220a; border: 1px solid #5a4a1a; color: #f0d080;
   border-radius: 10px; padding: 10px 12px; margin: 8px 0; font-size: 13px;
 }
+.live-dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--run); margin-right:7px; box-shadow:0 0 0 0 rgba(91,157,255,.5); }
+.live-dot.running { animation:pulse 1.4s infinite; }
+@keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(91,157,255,.5)} 70%{box-shadow:0 0 0 8px rgba(91,157,255,0)} 100%{box-shadow:0 0 0 0 rgba(91,157,255,0)} }
+.live-head { display:flex; align-items:center; gap:4px; font-size:13px; font-weight:700; }
+.live-metrics { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; margin-top:9px; }
+.live-metric { background:#0e0e12; border:1px solid #222; border-radius:10px; padding:8px; }
+.live-metric b { display:block; font-size:14px; }
+.live-metric span { color:var(--muted); font-size:10px; }
+@media (max-width:650px){.live-metrics{grid-template-columns:1fr 1fr 1fr}.live-metric{padding:7px 6px}}
 .success-box {
   background: #0a2a18; border: 1px solid #1a5a30; color: #a8f0c0;
   border-radius: 10px; padding: 12px; margin: 8px 0; font-size: 13px;
@@ -122,28 +131,97 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
   </div>
 
   <div class="tabs">
-    <div class="tab active" data-tab="dict">Словари</div>
-    <div class="tab" data-tab="brute">Перебор</div>
-    <div class="tab" data-tab="target">Цель</div>
+    <div class="tab active" data-tab="dict">📚 Словари</div>
+    <div class="tab" data-tab="brute">🔢 Перебор</div>
+  </div>
+
+  <div class="card compact-target">
+    <h2>Цель и сессия</h2>
+    <div class="grid">
+      <div>
+        <label>Режим проверки</label>
+        <select id="targetMode">
+          <option value="none">Только подсчёт</option>
+          <option value="exact">Точное совпадение</option>
+          <option value="sha256">SHA-256 кандидата</option>
+          <option value="wallet">Bitcoin Core wallet.dat</option>
+        </select>
+      </div>
+      <div>
+        <label>Профиль производительности</label>
+        <select id="perfProfile">
+          <option value="eco">Экономичный — iPhone</option>
+          <option value="balance" selected>Баланс — рекомендуется</option>
+          <option value="max">Максимум — мощное устройство</option>
+        </select>
+      </div>
+    </div>
+    <div class="row" style="margin-top:8px;align-items:center">
+      <button class="secondary" id="cryptoSelfTest">🧪 Проверить криптографию</button>
+      <div id="cryptoSelfTestStatus" class="muted" style="font-size:12px">Самотестирование ещё не запускалось.</div>
+    </div>
+    <div id="targetExact" style="display:none;margin-top:8px">
+      <label>Искомая строка</label>
+      <input type="text" id="targetString" placeholder="пароль или фраза">
+      <label style="margin-top:8px"><input type="checkbox" id="normalizeExact" checked> Нормализация строк: trim</label>
+    </div>
+    <div id="targetHash" style="display:none;margin-top:8px">
+      <label>Ожидаемый SHA-256 (hex, 64 символа)</label>
+      <input type="text" id="targetSha" placeholder="64 hex-символа" class="mono">
+    </div>
+    <details style="margin-top:8px">
+      <summary class="muted" style="cursor:pointer">Проверить один кандидат вручную</summary>
+      <div class="row" style="margin-top:8px"><input id="testCandidate" type="text" placeholder="кандидат"><button class="secondary" id="testCandidateBtn">Проверить</button></div>
+      <div id="testResult" class="muted" style="margin-top:6px;font-size:12px"></div>
+    </details>
+    <div id="targetWallet" style="display:none;margin-top:8px">
+      <label>Текущий wallet.dat</label>
+      <input type="file" id="walletFile" accept=".dat,.wallet,application/octet-stream">
+      <div class="muted" id="walletFileStatus" style="margin-top:6px;font-size:12px">Файл не загружен. Разбор выполняется локально.</div>
+      <div id="walletSessionInfo" class="mono" style="margin-top:6px;font-size:12px"></div>
+      <div class="row" style="margin-top:8px">
+        <button class="secondary" id="exportProgress">⬇ Экспорт прогресса</button>
+        <button class="secondary" id="importProgress">⬆ Импорт прогресса</button><div id="progressSecurityNote" class="muted" style="margin-top:6px;font-size:11px">Экспорт может содержать найденный пароль в открытом JSON.</div>
+        <input type="file" id="progressFile" accept="application/json,.json" style="display:none">
+      </div>
+      <div class="muted" style="margin-top:6px;font-size:12px">Экспорт привязан к конкретному wallet.dat и содержит checkpoint/статистику. Если пароль уже найден, он также сохраняется в JSON для мгновенного восстановления результата — храните файл как секрет.</div>
+      <details style="margin-top:10px">
+        <summary class="muted" style="cursor:pointer">Подробности wallet.dat</summary>
+        <label>mkey ciphertext (hex)</label>
+        <input type="text" id="mkeyCipher" class="mono" value="" placeholder="из wallet.dat">
+        <label>salt (hex)</label>
+        <input type="text" id="mkeySalt" class="mono" value="" placeholder="8 байт = 16 hex-символов">
+        <label>nDeriveIterations</label>
+        <input type="number" id="mkeyIter" value="" placeholder="например 49019">
+        <label>nDerivationMethod (0 = EVP_sha512)</label>
+        <input type="number" id="mkeyMethod" value="0">
+        <label style="margin-top:8px">ckey ciphertext</label>
+        <input type="text" id="mkeyCkey" class="mono" value="" placeholder="из wallet.dat" readonly>
+        <label>public key</label>
+        <input type="text" id="mkeyPubKey" class="mono" value="" placeholder="из wallet.dat" readonly>
+      </details>
+      <div class="warn" style="margin-top:8px">Legacy Bitcoin Core: nDerivationMethod=0, EVP_BytesToKey-SHA512, salt 8 байт, заданное число итераций и AES-256-CBC. Для FOUND дополнительно проверяются ckey и соответствующий public key.</div>
+    </div>
+    <div id="foundBox" class="success-box" style="display:none;margin-top:12px"></div>
   </div>
 
   <!-- ===================== DICT PANEL ===================== -->
   <div class="panel active" id="panel-dict">
     <div class="card">
-      <h2>Архив словарей</h2>
+      <h2>Бинарный словарь</h2>
       <div class="drop">
-        <input id="zip" type="file" accept=".zip,application/zip,.txt,.lst,.dic,text/plain">
-        <div class="muted" style="margin-top:6px">ZIP (SecLists и т.п.) или одиночный TXT/LST/DIC.<br>Ничего не уходит в интернет.</div>
+        <input id="dictionaryFile" type="file" accept=".sldb,application/octet-stream">
+        <div class="muted" style="margin-top:6px">SLDB v7 • готовый бинарный словарь SecLists.<br>Ничего не уходит в интернет.</div>
       </div>
       <div class="row" style="margin-top:10px">
-        <button id="scan">Просканировать</button>
+        <button id="scan">Проверить бинарный словарь</button>
         <button class="secondary" id="clearAll">Сбросить всё</button>
       </div>
       <div id="archiveInfo" class="muted" style="margin-top:10px"></div>
     </div>
 
     <div class="card">
-      <h2>Диспетчер</h2>
+      <h2>Словари и очередь</h2>
       <div class="stat-grid" id="dispatchStats">
         <div class="stat"><div class="label">Всего</div><div class="value" id="stTotal">0</div></div>
         <div class="stat"><div class="label">Завершено</div><div class="value" id="stDone">0</div></div>
@@ -181,6 +259,16 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
         <button class="secondary" id="retryErr">↻ Повторить ошибочные</button>
         <button class="danger" id="resetCurrent">Сбросить текущий</button>
       </div>
+      <div class="grid" style="margin-top:8px">
+        <button class="secondary" id="benchmark">⚡ Benchmark первых строк</button>
+        <div class="muted" id="benchmarkResult" style="font-size:12px;display:flex;align-items:center">Проверит небольшую выборку без изменения checkpoint.</div>
+      </div>
+      <div class="live-head" style="margin-top:12px"><span id="liveDot" class="live-dot"></span><span id="liveStatus">Готово к запуску</span></div>
+      <div class="live-metrics">
+        <div class="live-metric"><b id="liveSpeed">0</b><span>кандидатов/с</span></div>
+        <div class="live-metric"><b id="liveCount">0</b><span>проверено</span></div>
+        <div class="live-metric"><b id="liveProgress">0%</b><span>текущий словарь</span></div>
+      </div>
       <div style="margin-top:12px"><progress id="prog" value="0" max="1"></progress></div>
       <div class="muted" id="progressText" style="margin-top:6px">Готово. Выбранные словари обрабатываются последовательно.</div>
       <div id="currentInfo" class="mono" style="margin-top:8px;font-size:12px;line-height:1.5"></div>
@@ -203,70 +291,29 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
           <input type="number" id="maxLen" value="4" min="1" max="16">
         </div>
       </div>
-      <div id="spaceWarn" class="warn" style="display:none"></div>
+      <div id="spaceWarn" class="warn" style="display:none;margin-top:8px"></div>
       <div class="row" style="margin-top:10px">
-        <button id="calcSpace">Рассчитать пространство</button>
         <button id="startBrute">▶ Запустить перебор</button>
         <button class="secondary" id="pauseBrute">⏸ Пауза</button>
       </div>
       <div style="margin-top:10px"><progress id="bruteProg" value="0" max="1"></progress></div>
       <div class="muted" id="bruteText" style="margin-top:6px">Перебор не запущен.</div>
+      <div class="live-head" style="margin-top:12px"><span id="bruteLiveDot" class="live-dot"></span><span id="bruteLiveStatus">Готово к запуску</span></div>
+      <div class="live-metrics">
+        <div class="live-metric"><b id="bruteLiveSpeed">0</b><span>кандидатов/с</span></div>
+        <div class="live-metric"><b id="bruteLiveCount">0</b><span>проверено</span></div>
+        <div class="live-metric"><b id="bruteLiveProgress">0%</b><span>пространство</span></div>
+      </div>
       <div id="bruteInfo" class="mono" style="margin-top:8px;font-size:12px"></div>
     </div>
   </div>
 
-  <!-- ===================== TARGET PANEL ===================== -->
-  <div class="panel" id="panel-target">
-    <div class="card">
-      <h2>Цель проверки</h2>
-      <p class="muted" style="margin:0 0 10px;font-size:13px">
-        Кандидаты из словарей / перебора проверяются локально.
-        Для Bitcoin Core wallet.dat требуется корректный mkey (ciphertext, salt, nDeriveIterations, nDerivationMethod).
-        Если данных недостаточно — приложение явно сообщит об этом, а не выдаст ложный результат.
-      </p>
-      <label>Режим</label>
-      <select id="targetMode">
-        <option value="none">Только подсчёт (без проверки)</option>
-        <option value="exact">Точное совпадение строки</option>
-        <option value="sha256">SHA-256 хеш кандидата</option>
-        <option value="wallet">Bitcoin Core mkey (EVP_BytesToKey-SHA512 + AES-256-CBC)</option>
-      </select>
-      <div id="targetExact" style="display:none;margin-top:8px">
-        <label>Искомая строка</label>
-        <input type="text" id="targetString" placeholder="пароль или фраза">
-        <label style="margin-top:8px"><input type="checkbox" id="normalizeExact" checked> Нормализация строк: ВКЛ (trim)</label>
-      </div>
-      <div id="targetHash" style="display:none;margin-top:8px">
-        <label>Ожидаемый SHA-256 (hex, 64 символа)</label>
-        <input type="text" id="targetSha" placeholder="a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9ad9f146e" class="mono">
-      </div>
-      <div id="targetWallet" style="display:none;margin-top:8px">
-        <label>mkey ciphertext (hex)</label>
-        <input type="text" id="mkeyCipher" class="mono" value="e648d207eb6a457cc3b415e5e6db38759de529051d808b5d34c679c43020a233e6b5161de2e85070127009d61e4c8">
-        <label>salt (hex)</label>
-        <input type="text" id="mkeySalt" class="mono" value="09792b4786f368cb">
-        <label>nDeriveIterations</label>
-        <input type="number" id="mkeyIter" value="49019">
-        <label>nDerivationMethod (0 = EVP_sha512)</label>
-        <input type="number" id="mkeyMethod" value="0">
-        <div class="warn" style="margin-top:8px">
-          Для legacy Bitcoin Core используется фактический nDerivationMethod=0: EVP_BytesToKey(AES-256-CBC, SHA-512),
-          salt ровно 8 байт и заданное число итераций. PBKDF2 здесь не используется.
-          Для достоверного FOUND нужны также ckey и public key: одна только CMasterKey не содержит MAC.
-        </div>
-      </div>
-      <div id="foundBox" class="success-box" style="display:none;margin-top:12px"></div>
-    </div>
-  </div>
-
   <div class="card">
-    <h2>Состояние</h2>
-    <div class="mono" id="state" style="font-size:12px;line-height:1.5"></div>
-  </div>
-
-  <div class="card">
-    <h2>Журнал</h2>
-    <div id="log"></div>
+    <details open>
+      <summary style="cursor:pointer;font-weight:600">Состояние и журнал</summary>
+      <div class="mono" id="state" style="font-size:12px;line-height:1.5;margin-top:10px"></div>
+      <div id="log" style="margin-top:10px"></div>
+    </details>
   </div>
 </main>
 
@@ -280,8 +327,9 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
   const STORE = "states";
   const META_STORE = "meta";
   let db = null;
-  let zipFile = null;
+  let dictionaryFile = null;
   let entries = [];
+  let dictionaryMeta = null;
   let stopped = false;
   let skipCurrent = false;
   let processing = false;
@@ -289,10 +337,18 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
   let bruteProcessing = false;
   let foundCandidate = null;
   let sessionStats = { candidates: 0, startTs: 0, lastTs: 0, lastCount: 0 };
+  let lastYieldAt = 0;
+  let lastLivePaint = 0;
   let appState = "IDLE";
   let walletUnknownReason = "";
   let walletConfigCache = {key:null, cfg:null};
+  // Cache for the strict wallet verifier. Keep this global so Safari can
+  // access it from loadWalletDat() and the candidate-check hot loop.
+  let walletVerifierCache = {key:null, verifier:null};
+  let walletSession = { id:null, name:"", size:0, lastModified:0, hash:"", mkeyId:null, ckeyCount:0 };
+  const APP_VERSION = "1.10";
   const utf8Encoder = new TextEncoder();
+  const sldbUtf8Decoder = new TextDecoder("utf-8", {fatal:true});
   let logLines = [];
   const MAX_LOG_LINES = 300;
 
@@ -340,7 +396,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
 
   function idbGet(store, key) {
     return new Promise((res, rej) => {
-      if (!db) return rej(new Error("IndexedDB не инициализирован."));
+      if (!db) { res(null); return; }
       const tx = db.transaction(store, "readonly");
       const req = tx.objectStore(store).get(key);
       req.onsuccess = () => res(req.result ?? null);
@@ -350,7 +406,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
 
   function idbPut(store, key, val) {
     return new Promise((res, rej) => {
-      if (!db) return rej(new Error("IndexedDB не инициализирован."));
+      if (!db) { res(); return; }
       const tx = db.transaction(store, "readwrite");
       tx.objectStore(store).put(val, key);
       tx.oncomplete = () => res();
@@ -361,7 +417,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
 
   function idbPutMany(store, pairs) {
     return new Promise((res, rej) => {
-      if (!db) return rej(new Error("IndexedDB не инициализирован."));
+      if (!db) { res(); return; }
       if (!pairs.length) { res(); return; }
       const tx = db.transaction(store, "readwrite");
       const os = tx.objectStore(store);
@@ -374,7 +430,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
 
   function idbGetAll(store) {
     return new Promise((res, rej) => {
-      if (!db) return rej(new Error("IndexedDB не инициализирован."));
+      if (!db) { res([]); return; }
       const tx = db.transaction(store, "readonly");
       const req = tx.objectStore(store).getAll();
       req.onsuccess = () => res(req.result || []);
@@ -384,7 +440,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
 
   function idbClear(store) {
     return new Promise((res, rej) => {
-      if (!db) return rej(new Error("IndexedDB не инициализирован."));
+      if (!db) { res(); return; }
       const tx = db.transaction(store, "readwrite");
       tx.objectStore(store).clear();
       tx.oncomplete = () => res();
@@ -392,6 +448,58 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
       tx.onabort = () => rej(tx.error || new Error("IndexedDB transaction aborted."));
     });
   }
+
+  function sessionPrefix() {
+    return "scope:" + (walletSession.id || "default") + "|";
+  }
+  function scopedKey(key) { return sessionPrefix() + String(key); }
+  function scopedMetaKey(key) { return sessionPrefix() + "meta:" + String(key); }
+  async function idbDeletePrefix(store, prefix) {
+    if (!db) return;
+    await new Promise((res, rej) => {
+      const tx=db.transaction(store,"readwrite"), os=tx.objectStore(store), req=os.openCursor();
+      req.onsuccess=()=>{ const c=req.result; if(!c){return;} if(String(c.key).startsWith(prefix)) c.delete(); c.continue(); };
+      req.onerror=()=>rej(req.error); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); tx.onabort=()=>rej(tx.error||new Error("IndexedDB transaction aborted."));
+    });
+  }
+  function dictionarySignature() {
+    if (!dictionaryFile || !dictionaryMeta) return "";
+    return [
+      "SLDB",
+      "v" + dictionaryMeta.version,
+      dictionaryFile.name,
+      dictionaryFile.size,
+      dictionaryFile.lastModified || 0,
+      String(dictionaryMeta.recordCountBigInt)
+    ].join("|");
+  }
+  function perfSettings() {
+    const p = $("perfProfile") ? $("perfProfile").value : "balance";
+    // Batches are time-based: the phone gets regular opportunities to paint and
+    // respond, while fast desktop CPUs can process larger batches.
+    if (p === "eco") return {name:"Экономичный", uiEvery:48, checkpointEvery:8192, batchMs:70};
+    if (p === "max") return {name:"Максимум", uiEvery:256, checkpointEvery:16384, batchMs:260};
+    return {name:"Баланс", uiEvery:96, checkpointEvery:4096, batchMs:150};
+  }
+
+  function yieldToBrowser() {
+    return new Promise(resolve => {
+      if (typeof MessageChannel !== "undefined") {
+        const ch = new MessageChannel();
+        ch.port1.onmessage = () => resolve();
+        ch.port2.postMessage(0);
+      } else setTimeout(resolve, 0);
+    });
+  }
+
+  async function adaptiveYield(batchMs) {
+    const now = performance.now();
+    if (now - lastYieldAt >= batchMs) {
+      lastYieldAt = now;
+      await yieldToBrowser();
+    }
+  }
+
 
   function entryState(e) {
     return {
@@ -409,15 +517,15 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
   }
 
   async function saveEntry(e) {
-    await idbPut(STORE, e.key, entryState(e));
+    await idbPut(STORE, scopedKey(e.key), entryState(e));
   }
 
   async function saveEntries(list) {
-    await idbPutMany(STORE, list.map(e => [e.key, entryState(e)]));
+    await idbPutMany(STORE, list.map(e => [scopedKey(e.key), entryState(e)]));
   }
 
   async function loadEntryState(e) {
-    const s = await idbGet(STORE, e.key);
+    const s = await idbGet(STORE, scopedKey(e.key));
     if (s) Object.assign(e, {
       selected: !!s.selected,
       progress: Number(s.progress) || 0,
@@ -430,227 +538,235 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
   }
 
   async function loadAllEntryStates() {
-    const rows = await idbGetAll(STORE);
-    const map = new Map(rows.map(r => [r.name ? null : null, r]));
-    const byKey = new Map();
-    // Keys are not returned by getAll(); use getAllKeys in one transaction.
-    const keys = await new Promise((res, rej) => {
-      const tx = db.transaction(STORE, "readonly");
-      const req = tx.objectStore(STORE).getAllKeys();
-      req.onsuccess = () => res(req.result || []);
-      req.onerror = () => rej(req.error);
-    });
-    for (let i = 0; i < Math.min(keys.length, rows.length); i++) byKey.set(keys[i], rows[i]);
-    for (const e of entries) {
-      const st = byKey.get(e.key);
-      if (st) Object.assign(e, {
-        selected: !!st.selected,
-        progress: Number(st.progress) || 0,
-        status: st.status || "new",
-        line: Number(st.line) || 0,
-        totalLines: Number(st.totalLines) || 0,
-        lastCheckpoint: Number(st.lastCheckpoint) || 0
-      });
-    }
+    for (const e of entries) await loadEntryState(e);
   }
 
-  /* ========== ZIP PARSER ========== */
-  function u16(a, o) { return a[o] | (a[o + 1] << 8); }
-  function u32(a, o) { return (a[o] | (a[o + 1] << 8) | (a[o + 2] << 16) | (a[o + 3] << 24)) >>> 0; }
+  /* ========== SLDB v7 READER ========== */
+  const SLDB_HEADER_SIZE = 32;
+  const SLDB_MAGIC = new Uint8Array([0x53,0x4c,0x44,0x42]);
+  const SLDB_VERSION = 7;
+  const SLDB_READ_CHUNK = 512 * 1024;
+  const SLDB_MAX_RECORD = 64 * 1024 * 1024;
 
-  function findEOCD(buf) {
-    for (let i = buf.length - 22; i >= 0; i--) {
-      if (u32(buf, i) === 0x06054b50) return i;
+  class SLDBReader {
+    constructor(file) {
+      this.file = file;
+      this.offset = 0;
+      this.recordNo = 0n;
+      this.recordCount = 0n;
+      this.version = 0;
+      this.flags = 0;
+      this.buffer = new Uint8Array(SLDB_READ_CHUNK);
+      this.bufferStart = 0;
+      this.bufferPos = 0;
+      this.bufferEnd = 0;
+      this.closed = false;
     }
-    return -1;
-  }
 
-  async function parseZip(file) {
-    const tailSize = Math.min(file.size, 65536 + 22);
-    const tail = new Uint8Array(await file.slice(file.size - tailSize).arrayBuffer());
-    const e = findEOCD(tail);
-    if (e < 0) throw new Error("Не найден ZIP End Of Central Directory (повреждённый или не ZIP).");
-
-    const disk = u16(tail, e + 4);
-    const cdDisk = u16(tail, e + 6);
-    const totalDisk = u16(tail, e + 8);
-    const total = u16(tail, e + 10);
-    const cdSize = u32(tail, e + 12);
-    const cdOff = u32(tail, e + 16);
-    if (disk !== 0 || cdDisk !== 0 || totalDisk !== total) throw new Error("Многодисковый ZIP не поддерживается.");
-    if (cdOff === 0xffffffff || cdSize === 0xffffffff || total === 0xffff) {
-      throw new Error("ZIP64 архивы в этой версии не поддерживаются: выберите обычный ZIP.");
+    async open() {
+      if (!this.file) throw new Error("SLDB файл не выбран.");
+      if (this.file.size < SLDB_HEADER_SIZE) throw new Error("Повреждённый SLDB — файл короче 32-byte header.");
+      const h = new Uint8Array(await this.file.slice(0, SLDB_HEADER_SIZE).arrayBuffer());
+      for (let i = 0; i < 4; i++) if (h[i] !== SLDB_MAGIC[i]) throw new Error("Неверный SLDB magic: ожидалось SLDB.");
+      this.version = h[4];
+      if (this.version !== SLDB_VERSION) throw new Error(`Unsupported SLDB version: ${this.version}`);
+      this.flags = h[5];
+      if (typeof DataView.prototype.getBigUint64 !== "function") throw new Error("Этот браузер не поддерживает uint64 для SLDB.");
+      this.recordCount = new DataView(h.buffer, h.byteOffset, h.byteLength).getBigUint64(8, true);
+      if (this.recordCount < 0n) throw new Error("Некорректный record count SLDB.");
+      this.offset = SLDB_HEADER_SIZE;
+      this.recordNo = 0n;
+      this.bufferStart = this.offset;
+      this.bufferPos = 0;
+      this.bufferEnd = 0;
+      this.closed = false;
+      return this;
     }
-    if (cdOff + cdSize > file.size) throw new Error("Центральный каталог выходит за границы файла.");
 
-    const out = [];
-    const CHUNK = 1024 * 1024;
-    let pos = 0;
-    let carry = new Uint8Array(0);
-    let seen = 0;
+    _available() { return this.bufferEnd - this.bufferPos; }
 
-    while (pos < cdSize) {
-      const take = Math.min(CHUNK, cdSize - pos);
-      const chunk = new Uint8Array(await file.slice(cdOff + pos, cdOff + pos + take).arrayBuffer());
-      const buf = new Uint8Array(carry.length + chunk.length);
-      buf.set(carry, 0); buf.set(chunk, carry.length);
-      carry = buf;
-      let p = 0;
+    async _fill(minBytes) {
+      if (this.closed) throw new Error("SLDBReader закрыт.");
+      if (minBytes > this.buffer.length) {
+        const need = minBytes;
+        const parts = [];
+        let remaining = need;
+        if (this._available()) {
+          parts.push(this.buffer.slice(this.bufferPos, this.bufferEnd));
+          remaining -= parts[0].length;
+        }
+        const extra = new Uint8Array(remaining);
+        const got = new Uint8Array(await this.file.slice(this.bufferStart + this.bufferEnd, this.bufferStart + this.bufferEnd + remaining).arrayBuffer());
+        extra.set(got);
+        parts.push(extra);
+        let out = new Uint8Array(need);
+        let p = 0;
+        for (const part of parts) { out.set(part, p); p += part.length; }
+        this.buffer = out;
+        this.bufferStart = this.offset - this._available();
+        this.bufferPos = 0;
+        this.bufferEnd = p;
+        return;
+      }
 
-      while (p + 46 <= carry.length && seen < total) {
-        if (u32(carry, p) !== 0x02014b50) {
-          throw new Error("Повреждённый центральный каталог ZIP.");
-        }
-        const method = u16(carry, p + 10);
-        const flags = u16(carry, p + 8);
-        if (flags & 1) throw new Error("Зашифрованные ZIP entries не поддерживаются: " + (seen + 1));
-        const crc = u32(carry, p + 16);
-        const csize = u32(carry, p + 20);
-        const usize = u32(carry, p + 24);
-        const nlen = u16(carry, p + 28);
-        const xlen = u16(carry, p + 30);
-        const clen = u16(carry, p + 32);
-        const local = u32(carry, p + 42);
-        const recLen = 46 + nlen + xlen + clen;
-        if (p + recLen > carry.length) break;
-        if (csize === 0xffffffff || usize === 0xffffffff || local === 0xffffffff) {
-          throw new Error("ZIP64 entry не поддерживается: " + "entry #" + (seen + 1));
-        }
-        let nameBytes = carry.slice(p + 46, p + 46 + nlen);
-        let name;
-        try {
-          name = new TextDecoder("utf-8", { fatal: false }).decode(nameBytes);
-        } catch (_) {
-          name = new TextDecoder().decode(nameBytes);
-        }
-        p += recLen;
-        seen++;
-        if (name.endsWith("/")) continue;
-        const low = name.toLowerCase();
-        if (low.endsWith(".txt") || low.endsWith(".lst") || low.endsWith(".dic") || low.endsWith(".dict")) {
-          out.push({
-            name, method, flags, csize, usize, local, crc,
-            selected: false, progress: 0, status: "new",
-            line: 0, totalLines: 0, lastCheckpoint: 0,
-            key: name + "|" + crc + "|" + usize + "|" + method,
-            single: false
-          });
+      if (this._available() >= minBytes) return;
+      const leftover = this._available();
+      if (leftover) this.buffer.copyWithin(0, this.bufferPos, this.bufferEnd);
+      this.bufferStart = this.offset;
+      this.bufferPos = 0;
+      this.bufferEnd = leftover;
+      const want = Math.max(SLDB_READ_CHUNK, minBytes - leftover);
+      const readStart = this.offset + leftover;
+      const end = Math.min(this.file.size, readStart + want);
+      if (end <= readStart) return;
+      const got = new Uint8Array(await this.file.slice(readStart, end).arrayBuffer());
+      this.buffer.set(got, leftover);
+      this.bufferEnd += got.length;
+    }
+
+    async _readExact(n) {
+      if (n < 0) throw new Error("Некорректный размер чтения SLDB.");
+      await this._fill(n);
+      if (this._available() < n) return null;
+      const out = this.buffer.subarray(this.bufferPos, this.bufferPos + n);
+      this.bufferPos += n;
+      this.offset += n;
+      return out;
+    }
+
+    async readNextBytes() {
+      if (this.closed) throw new Error("SLDBReader закрыт.");
+      if (this.offset >= this.file.size) {
+        if (this.recordNo !== this.recordCount) throw new Error(`Повреждённый SLDB — EOF после ${this.recordNo.toString()} из ${this.recordCount.toString()} записей.`);
+        return null;
+      }
+      // EOF is the physical end of the file; recordCount is metadata used for
+      // progress/checkpoint reporting and is verified against the actual stream.
+      if (this.recordNo >= this.recordCount) throw new Error("Повреждённый SLDB — в файле есть записи сверх заявленного record count.");
+      const lenBytes = await this._readExact(4);
+      if (!lenBytes) throw new Error("Повреждённый SLDB — неполный record header.");
+      const len = new DataView(lenBytes.buffer, lenBytes.byteOffset, 4).getUint32(0, true);
+      if (len > SLDB_MAX_RECORD) throw new Error(`Повреждённый SLDB — record length ${len} превышает разумный максимум.`);
+      if (this.offset + len > this.file.size) throw new Error("Повреждённый SLDB — запись выходит за границы файла.");
+
+      let out;
+      if (len <= this.buffer.length) {
+        await this._fill(len);
+        if (this._available() < len) throw new Error("Повреждённый SLDB — неполная запись.");
+        out = this.buffer.subarray(this.bufferPos, this.bufferPos + len);
+        this.bufferPos += len;
+        this.offset += len;
+      } else {
+        out = new Uint8Array(len);
+        let written = 0;
+        while (written < len) {
+          const avail = this._available();
+          if (avail) {
+            const take = Math.min(avail, len - written);
+            out.set(this.buffer.subarray(this.bufferPos, this.bufferPos + take), written);
+            this.bufferPos += take;
+            this.offset += take;
+            written += take;
+          }
+          if (written < len) {
+            const need = Math.min(SLDB_READ_CHUNK, len - written);
+            const got = new Uint8Array(await this.file.slice(this.offset, this.offset + need).arrayBuffer());
+            if (!got.length) throw new Error("Повреждённый SLDB — неполная запись.");
+            out.set(got, written);
+            written += got.length;
+            this.offset += got.length;
+            this.bufferStart = this.offset;
+            this.bufferPos = 0;
+            this.bufferEnd = 0;
+          }
         }
       }
-      carry = carry.slice(p);
-      pos += take;
-      await new Promise(r => setTimeout(r, 0));
+      this.recordNo++;
+      return out;
     }
-    if (seen !== total) throw new Error("Центральный каталог ZIP обрезан или повреждён.");
-    return out;
+
+    async readNext() {
+      const bytes = await this.readNextBytes();
+      if (bytes === null) return null;
+      try {
+        return sldbUtf8Decoder.decode(bytes);
+      } catch (_) {
+        throw new Error(`Повреждённый SLDB — запись ${this.recordNo.toString()} содержит некорректный UTF-8.`);
+      }
+    }
+
+    async skipRecords(count) {
+      let n = typeof count === "bigint" ? count : BigInt(count || 0);
+      while (n > 0n) {
+        if (this.recordNo >= this.recordCount) return false;
+        const bytes = await this.readNextBytes();
+        if (bytes === null) return false;
+        n--;
+        if ((this.recordNo & 2047n) === 0n) await new Promise(r => setTimeout(r, 0));
+      }
+      return true;
+    }
+
+    async reset() {
+      this.offset = SLDB_HEADER_SIZE;
+      this.recordNo = 0n;
+      this.bufferStart = this.offset;
+      this.bufferPos = 0;
+      this.bufferEnd = 0;
+      return this;
+    }
+
+    async close() {
+      this.closed = true;
+      this.buffer = new Uint8Array(0);
+      this.bufferStart = this.bufferPos = this.bufferEnd = 0;
+    }
   }
 
-  async function getLocalHeaderInfo(e) {
-    const h = new Uint8Array(await zipFile.slice(e.local, e.local + 30).arrayBuffer());
-    if (u32(h, 0) !== 0x04034b50) throw new Error("Плохой local header: " + e.name);
-    const flags = u16(h, 6);
-    const method = u16(h, 8);
-    const n = u16(h, 26);
-    const x = u16(h, 28);
-    return { start: e.local + 30 + n + x, csize: e.csize, method, flags };
-  }
-
-  /* ========== STREAMING LINE PROCESSOR ========== */
-  function makeLineStream(stream) {
-    let buffer = "";
-    return new ReadableStream({
-      async start(controller) {
-        const reader = stream.getReader();
+  async function createLineStream(e, startLine = 0) {
+    let sourceReader = null;
+    let opened = false;
+    let closed = false;
+    let pulling = false;
+    const ready = (async () => {
+      sourceReader = new SLDBReader(dictionaryFile);
+      await sourceReader.open();
+      if (startLine) {
+        const ok = await sourceReader.skipRecords(startLine);
+        if (!ok) throw new Error(`Checkpoint ${startLine} выходит за пределы SLDB.`);
+      }
+      opened = true;
+    })();
+    return ready.then(() => new ReadableStream({
+      async start() {},
+      async pull(controller) {
+        if (!opened || closed || pulling) return;
+        pulling = true;
         try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              if (buffer.length) controller.enqueue(buffer);
-              controller.close();
-              break;
-            }
-            buffer += value;
-            while (true) {
-              const n = buffer.indexOf("\n");
-              const r = buffer.indexOf("\r");
-              if (n < 0 && r < 0) break;
-              let cut, cutLen;
-              if (r >= 0 && (n < 0 || r < n)) {
-                // A CR at the very end may be the first half of CRLF in the next chunk.
-                if (r === buffer.length - 1) break;
-                cut = r;
-                cutLen = buffer[r + 1] === "\n" ? 2 : 1;
-              } else {
-                cut = n;
-                cutLen = 1;
-              }
-              controller.enqueue(buffer.slice(0, cut));
-              buffer = buffer.slice(cut + cutLen);
-            }
+          const candidate = await sourceReader.readNext();
+          if (candidate === null) {
+            closed = true;
+            await sourceReader.close();
+            controller.close();
+            return;
           }
+          // One SLDB record per pull: never allow the ReadableStream queue to
+          // accumulate thousands/millions of candidates in Safari RAM.
+          controller.enqueue(candidate);
+          await adaptiveYield(perfSettings().batchMs);
         } catch (err) {
+          closed = true;
+          try { await sourceReader.close(); } catch (_) {}
           controller.error(err);
         } finally {
-          try { reader.releaseLock(); } catch (_) {}
+          pulling = false;
         }
+      },
+      async cancel() {
+        closed = true;
+        if (sourceReader) { try { await sourceReader.close(); } catch (_) {} }
       }
-    });
-  }
-
-  async function createLineStream(e) {
-    if (e.single) {
-      return makeLineStream(zipFile.stream().pipeThrough(new TextDecoderStream("utf-8", { fatal: false })));
-    }
-    const info = await getLocalHeaderInfo(e);
-    const blob = zipFile.slice(info.start, info.start + info.csize);
-    let stream = blob.stream();
-    if (info.method === 8) {
-      if (!("DecompressionStream" in self)) {
-        throw new Error("Safari/браузер не поддерживает DecompressionStream для Deflate ZIP.");
-      }
-      stream = stream.pipeThrough(new DecompressionStream("deflate-raw"));
-    } else if (info.method !== 0) {
-      throw new Error("Метод сжатия ZIP не поддержан: " + info.method + " (нужен Store или Deflate).");
-    }
-    if ("TextDecoderStream" in self) {
-      stream = stream.pipeThrough(new TextDecoderStream("utf-8", { fatal: false }));
-      return makeLineStream(stream);
-    }
-    // Compatibility fallback: keep a TextDecoder between binary chunks.
-    const reader = stream.getReader();
-    let decoder = new TextDecoder("utf-8", { fatal: false });
-    let buffer = "";
-    return new ReadableStream({
-      async start(controller) {
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              const tail = decoder.decode();
-              if (tail) buffer += tail;
-              if (buffer.length) controller.enqueue(buffer);
-              controller.close();
-              break;
-            }
-            buffer += decoder.decode(value, { stream: true });
-            while (true) {
-              const n = buffer.indexOf("\n"), r = buffer.indexOf("\r");
-              if (n < 0 && r < 0) break;
-              let cut, cutLen;
-              if (r >= 0 && (n < 0 || r < n)) {
-                if (r === buffer.length - 1) break;
-                cut = r; cutLen = buffer[r + 1] === "\n" ? 2 : 1;
-              } else {
-                cut = n; cutLen = 1;
-              }
-              controller.enqueue(buffer.slice(0, cut));
-              buffer = buffer.slice(cut + cutLen);
-            }
-          }
-        } catch (err) { controller.error(err); }
-        finally { try { reader.releaseLock(); } catch (_) {} }
-      }
-    });
+    }));
   }
 
   /* ========== TARGET CHECK ========== */
@@ -678,30 +794,58 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
     return r;
   }
 
+  /* ========== FAST LEGACY EVP_SHA512 ENGINE ==========
+     The browser Web Crypto API does not expose OpenSSL EVP_BytesToKey.
+     Calling crypto.subtle.digest() ~49,019 times for every candidate is catastrophically slow
+     on iPhone/Safari. A tiny embedded WebAssembly SHA-512 implementation performs the complete
+     EVP_BytesToKey chain in one native WebAssembly call. No PBKDF2 approximation is used. */
+  const EVP_WASM_B64 = "AGFzbQEAAAABFgNgA39/fwF/YAV/f39/fwBgA39/fwADBAMAAQIFBAEBAhAGCAF/AUGAjQQLBxcCBm1lbW9yeQIACmV2cF9zaGE1MTIAAQqvEgPHAQEDfwJAIAJFDQACQAJAIAJBB3EiAw0AIAAhBCACIQUMAQsgAkF4cSEFIAAhBANAIAQgAS0AADoAACAEQQFqIQQgAUEBaiEBIANBf2oiAw0ACwsgAkEISQ0AA0AgBCABLQAAOgAAIAQgAS0AAToAASAEIAEtAAI6AAIgBCABLQADOgADIAQgAS0ABDoABCAEIAEtAAU6AAUgBCABLQAGOgAGIAQgAS0ABzoAByAEQQhqIQQgAUEIaiEBIAVBeGoiBQ0ACwsgAAvCAwECfyOAgICAAEGQBGsiBSSAgICAACABQfgBIAFB+AFJGyEGAkAgAUUNACAFQdAAaiAAIAYQgICAgAAaCyAFQdAAaiAGaiACKQAANwAAIAUgBUHQAGogBkEIaiIBEICAgIAAIgUgASAFQdADahCCgICAAAJAIANBAkkNACADQX9qIQEDQCAFQdADakHAACAFQZADahCCgICAACAFQdADakE4aiAFQZADakE4aikDADcDACAFQdADakEwaiAFQZADakEwaikDADcDACAFQdADakEoaiAFQZADakEoaikDADcDACAFQdADakEgaiAFQZADakEgaikDADcDACAFQdADakEYaiAFQZADakEYaikDADcDACAFQdADakEQaiAFQZADakEQaikDADcDACAFIAUpA5gDNwPYAyAFIAUpA5ADNwPQAyABQX9qIgENAAsLIAQgBSkD0AM3AAAgBEEIaiAFKQPYAzcAACAEQShqIAVB0ANqQShqKQMANwAAIARBIGogBUHQA2pBIGopAwA3AAAgBEEYaiAFQdADakEYaikDADcAACAEQRBqIAVB0ANqQRBqKQMANwAAIAVBkARqJICAgIAAC58NBgJ/CH4EfwF+Cn8NfiOAgICAAEGABmsiAySAgICAAAJAAkAgAUGQAWoiBEGAAU8NAEKIkvOd/8z5hOoAIQVCu86qptjQ67O7fyEGQqvw0/Sv7ry3PCEHQvHt9Pilp/2npX8hCELRhZrv+s+Uh9EAIQlCn9j52cKR2oKbfyEKQuv6htq/tfbBHyELQvnC+JuRo7Pw2wAhDAwBC0EAIAFrIQ0gAUEDdCEOIARBB3YiD0F/aiEQIAGtIhFCHYinIRIgEUIViKchEyARQg2IpyEUIBFCBYinIRVCiJLznf/M+YTqACEFQrvOqqbY0Ouzu38hBkKr8NP0r+68tzwhB0Lx7fT4paf9p6V/IQhC0YWa7/rPlIfRACEJQp/Y+dnCkdqCm38hCkLr+obav7X2wR8hC0L5wvibkaOz8NsAIQxBACEWQQAhFwNAQYB/IQQDQCANIARqIRgCQAJAIBYgBGoiGUGAAWogAU8NACAAIARqQYABai0AACEaDAELQYB/QQAgGEGAf0YbIRoLIANBgAVqIARqIhtBgAFqIBo6AAACQAJAIBlBgQFqIAFJDQBBgH9BACAYQf9+RhshGAwBCyAAIARqQYEBai0AACEYCyAbQYEBaiAYOgAAIARBAmoiBA0ACwJAIBcgEEcNACADIBU6AP4FIAMgDjoA/wUgAyAUOgD9BSADIBM6APwFIAMgEjoA+wUgA0EAOgD6BSADQQA7AfgFC0EAIRgDQCADIBhqIANBgAVqIBhqIgQxAABCEIYgBEEBajEAAEIIhoQgBEECajEAAIRCEIYgBEEDajEAAEIIhoQgBEEEajEAAIRCEIYgBEEFajEAAEIIhoQgBEEGajEAAIRCCIYgBEEHajEAAIQ3AwAgGEEIaiIYQYABRw0AC0EAIRggAykDACEcA0AgAyAYaiIEQYABaiAEQQhqKQMAIhFCP4kgEUI4iYUgEUIHiIUgHHwgBEHIAGopAwB8IARB8ABqKQMAIhxCLYkgHEIDiYUgHEIGiIV8NwMAIBEhHCAYQQhqIhhBgARHDQALQQAhBCAMIR0gCyEeIAohHyAJISAgCCEhIAchIiAGISMgBSEkA0AgIiIlICMiJoUgJCIcgyAlICaDhSAcQiSJIBxCHomFIBxCGYmFfCAdICAiEUIyiSARQi6JhSARQheJhXwgHiInIBFCf4WDIB8iKCARg4R8IARBgIiAgABqKQMAfCADIARqKQMAfCIgfCEkICAgIXwhICAnIR0gKCEeIBEhHyAlISEgJiEiIBwhIyAEQQhqIgRBgAVHDQALIBZBgAFqIRYgDUGAAWohDSAAQYABaiEAICcgDHwhDCAoIAt8IQsgESAKfCEKICAgCXwhCSAlIAh8IQggJiAHfCEHIBwgBnwhBiAkIAV8IQUgF0EBaiIXIA9HDQALCyACIAw8AD8gAiALPAA3IAIgCjwALyACIAk8ACcgAiAIPAAfIAIgBzwAFyACIAY8AA8gAiAFPAAHIAIgDEIIiDwAPiACIAxCEIg8AD0gAiAMQhiIPAA8IAIgDEIgiDwAOyACIAxCKIg8ADogAiAMQjCIPAA5IAIgDEI4iDwAOCACIAtCCIg8ADYgAiALQhCIPAA1IAIgC0IYiDwANCACIAtCIIg8ADMgAiALQiiIPAAyIAIgC0IwiDwAMSACIAtCOIg8ADAgAiAKQgiIPAAuIAIgCkIQiDwALSACIApCGIg8ACwgAiAKQiCIPAArIAIgCkIoiDwAKiACIApCMIg8ACkgAiAKQjiIPAAoIAIgCUIIiDwAJiACIAlCEIg8ACUgAiAJQhiIPAAkIAIgCUIgiDwAIyACIAlCKIg8ACIgAiAJQjCIPAAhIAIgCUI4iDwAICACIAhCCIg8AB4gAiAIQhCIPAAdIAIgCEIYiDwAHCACIAhCIIg8ABsgAiAIQiiIPAAaIAIgCEIwiDwAGSACIAhCOIg8ABggAiAHQgiIPAAWIAIgB0IQiDwAFSACIAdCGIg8ABQgAiAHQiCIPAATIAIgB0IoiDwAEiACIAdCMIg8ABEgAiAHQjiIPAAQIAIgBkIIiDwADiACIAZCEIg8AA0gAiAGQhiIPAAMIAIgBkIgiDwACyACIAZCKIg8AAogAiAGQjCIPAAJIAIgBkI4iDwACCACIAVCCIg8AAYgAiAFQhCIPAAFIAIgBUIYiDwABCACIAVCIIg8AAMgAiAFQiiIPAACIAIgBUIwiDwAASACIAVCOIg8AAAgA0GABmokgICAgAALC4gFAQBBgAgLgAUirijXmC+KQs1l7yORRDdxLztN7M/7wLW824mBpdu16Ti1SPNbwlY5GdAFtvER8VmbTxmvpII/khiBbdrVXhyrQgIDo5iqB9i+b3BFAVuDEoyy5E6+hTEk4rT/1cN9DFVviXvydF2+crGWFjv+sd6ANRLHJacG3JuUJmnPdPGbwdJK8Z7BaZvk4yVPOIZHvu+11YyLxp3BD2WcrHfMoQwkdQIrWW8s6S2D5KZuqoR0StT7Qb3cqbBctVMRg9qI+Xar32buUlE+mBAytC1txjGoPyH7mMgnA7DkDu++x39Zv8KPqD3zC+DGJacKk0eRp9VvggPgUWPKBnBuDgpnKSkU/C/SRoUKtycmySZcOCEbLu0qxFr8bSxN37OVnRMNOFPeY6+LVHMKZaiydzy7Cmp25q7tRy7JwoE7NYIUhSxykmQD8Uyh6L+iATBCvEtmGqiRl/jQcItLwjC+VAajUWzHGFLv1hnoktEQqWVVJAaZ1iogcVeFNQ70uNG7MnCgahDI0NK4FsGkGVOrQVEIbDcemeuO30x3SCeoSJvhtbywNGNaycWzDBw5y4pB40qq2E5z42N3T8qcW6O4stbzby5o/LLvXe6Cj3RgLxdDb2OleHKr8KEUeMiE7DlkGggCx4woHmMj+v++kOm9gt7rbFCkFXnGsvej+b4rU3Lj8nhxxpxhJurOPifKB8LAIce4htEe6+DN1n3a6njRbu5/T331um8Xcqpn8AammMiixX1jCq4N+b4EmD8RG0ccEzULcRuEfQQj9XfbKJMkx0B7q8oyvL7JFQq+njxMDRCcxGcdQ7ZCPsu+1MVMKn5l/Jwpf1ns+tY6q2/LXxdYR0qMGURsAE8EbmFtZQAJCGV2cC53YXNtAR0DAAZtZW1jcHkBCmV2cF9zaGE1MTICBnNoYTUxMgcSAQAPX19zdGFja19wb2ludGVyCQoBAAcucm9kYXRhAH8JcHJvZHVjZXJzAQxwcm9jZXNzZWQtYnkBBWNsYW5nXzE3LjAuMCAoaHR0cHM6Ly9naXRodWIuY29tL3N3aWZ0bGFuZy9sbHZtLXByb2plY3QuZ2l0IDEwOTk5YjZkMDM0ZmUzMThmM2Q1NmM4M2JkZGI2NTcyNTkzYThiYjApAEkPdGFyZ2V0X2ZlYXR1cmVzBCsKbXVsdGl2YWx1ZSsPbXV0YWJsZS1nbG9iYWxzKw9yZWZlcmVuY2UtdHlwZXMrCHNpZ24tZXh0";
+  let evpWasmPromise = null;
+  function initEvpWasm() {
+    if (evpWasmPromise) return evpWasmPromise;
+    evpWasmPromise = (async () => {
+      if (!self.WebAssembly) throw new Error("WebAssembly недоступен в этом браузере.");
+      const bin = Uint8Array.from(atob(EVP_WASM_B64), c => c.charCodeAt(0));
+      const mod = await WebAssembly.instantiate(bin, {});
+      const ex = mod.instance.exports;
+      if (!ex.memory || typeof ex.evp_sha512 !== "function") throw new Error("Не удалось инициализировать быстрый EVP-SHA512.");
+      return {instance:mod.instance, memory:ex.memory, evp:ex.evp_sha512, mem:new Uint8Array(ex.memory.buffer)};
+    })();
+    return evpWasmPromise;
+  }
+
   // Bitcoin Core legacy nDerivationMethod=0 uses EVP_BytesToKey(AES-256-CBC, SHA-512).
   // Web Crypto is used for SHA-512 here to avoid shipping a second independent hash implementation.
   async function evpBytesToKeySHA512(passwordBytes, salt, count) {
     if (!Number.isInteger(count) || count < 1) throw new Error("nDeriveIterations должен быть целым числом >= 1.");
     if (salt.length !== 8) throw new Error("salt Bitcoin Core должен быть ровно 8 байт.");
+    if (passwordBytes.length > 248) throw new Error("Пароль слишком длинный для быстрого EVP-движка (максимум 248 UTF-8 байт).");
+    let w;
+    try { w = await initEvpWasm(); } catch (_) { return evpBytesToKeySHA512Fallback(passwordBytes, salt, count); }
+    // The embedded module reserves plenty of linear memory. Calls are synchronous,
+    // so there is no interleaving between two candidate checks.
+    // Keep these buffers well away from the module stack.
+    const PASS_PTR = 10000, SALT_PTR = 11024, OUT_PTR = 12048;
+    w.mem.set(passwordBytes, PASS_PTR);
+    w.mem.set(salt, SALT_PTR);
+    w.evp(PASS_PTR, passwordBytes.length, SALT_PTR, count, OUT_PTR);
+    return { key: w.mem.slice(OUT_PTR, OUT_PTR + 32), iv: w.mem.slice(OUT_PTR + 32, OUT_PTR + 48) };
+  }
+
+  async function evpBytesToKeySHA512Fallback(passwordBytes, salt, count) {
     const data = concatBytes(passwordBytes, salt);
     let prev = new Uint8Array(0);
     const chunks = [];
     let produced = 0;
-    for (let block = 0; produced < 48; block++) {
-      let d = await crypto.subtle.digest("SHA-512", concatBytes(prev, data));
-      d = new Uint8Array(d);
-      for (let i = 1; i < count; i++) {
-        d = new Uint8Array(await crypto.subtle.digest("SHA-512", d));
-        if ((i & 1023) === 0) await new Promise(r => setTimeout(r, 0));
-      }
-      chunks.push(d);
-      produced += d.length;
-      prev = d;
+    while (produced < 48) {
+      let d = new Uint8Array(await crypto.subtle.digest("SHA-512", concatBytes(prev, data)));
+      for (let i = 1; i < count; i++) d = new Uint8Array(await crypto.subtle.digest("SHA-512", d));
+      chunks.push(d); produced += d.length; prev = d;
+      await new Promise(r => setTimeout(r, 0));
     }
     const joined = new Uint8Array(chunks.length * 64);
-    let p = 0;
-    for (const c of chunks) { joined.set(c, p); p += c.length; }
-    return { key: joined.slice(0, 32), iv: joined.slice(32, 48) };
+    let p = 0; for (const c of chunks) { joined.set(c, p); p += c.length; }
+    return {key:joined.slice(0,32), iv:joined.slice(32,48)};
   }
 
   async function aesCbcDecrypt(keyBytes, ivBytes, cipherBytes) {
@@ -728,12 +872,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
     while(k>0n){if(k&1n)R=pointAdd(R,Q);Q=pointAdd(Q,Q);k>>=1n;}return R;
   }
   function pubFromPriv(priv, compressed){
-    const P=pointMul(priv);
-    if(!P) return null;
-    const xb=P.x.toString(16).padStart(64,"0");
-    const yb=P.y.toString(16).padStart(64,"0");
-    if(compressed) return "02"+xb.slice(0,64).repeat(0) + (P.y&1n ? "03" : "02") + xb; // fixed below
-    return "04"+xb+yb;
+    return derivePubHex(priv, compressed);
   }
   function derivePubHex(priv, compressed){
     const P=pointMul(priv); if(!P) return null;
@@ -744,6 +883,19 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
   async function sha256Bytes(bytes) {
     if (!crypto || !crypto.subtle) throw new Error("Web Crypto API недоступен.");
     return new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  }
+
+  async function validateBitcoinCkeyCached(masterKey, verifier) {
+    const {ckey, pubkey, iv} = verifier;
+    const plain = await aesCbcDecrypt(masterKey, iv, ckey);
+    if (plain.length !== 32) return {status:"invalid", reason:"Расшифрованный ckey имеет не 32 байта."};
+    let priv = 0n;
+    for (let i = 0; i < plain.length; i++) priv = (priv << 8n) | BigInt(plain[i]);
+    if (priv <= 0n || priv >= SECP_N) return {status:"invalid", reason:"Расшифрованный приватный ключ вне диапазона secp256k1."};
+    const actual = derivePubHex(priv, pubkey.length === 33);
+    const expected = hexOf(pubkey).toLowerCase();
+    if (actual !== expected) return {status:"invalid", reason:"Расшифрованный приватный ключ не соответствует public key."};
+    return {status:"valid", reason:"mkey + ckey + public key подтверждены."};
   }
 
   async function validateBitcoinCkey(masterKey, ckey, pubkey) {
@@ -760,6 +912,152 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
     const expected = hexOf(pubkey).toLowerCase();
     if (actual !== expected) return {status:"invalid", reason:"Расшифрованный приватный ключ не соответствует public key."};
     return {status:"valid", reason:"mkey + ckey + public key подтверждены."};
+  }
+
+  function readU16LE(a, p) { return a[p] | (a[p+1] << 8); }
+  function readU32LE(a, p) { return (a[p] | (a[p+1] << 8) | (a[p+2] << 16) | (a[p+3] << 24)) >>> 0; }
+  function compactSizeRead(a, p) {
+    if (p >= a.length) throw new Error("CompactSize: неожиданный конец данных.");
+    const x = a[p++];
+    if (x < 253) return {value:x, next:p};
+    if (x === 253) {
+      if (p+2 > a.length) throw new Error("CompactSize: обрезанные данные.");
+      return {value:readU16LE(a,p), next:p+2};
+    }
+    if (x === 254) {
+      if (p+4 > a.length) throw new Error("CompactSize: обрезанные данные.");
+      const v = readU32LE(a,p);
+      return {value:v, next:p+4};
+    }
+    throw new Error("CompactSize uint64 в wallet.dat не поддерживается этим локальным парсером.");
+  }
+  function bdbItem(page, off, pageSize) {
+    if (off < 26 || off + 3 > pageSize) return null;
+    const len = readU16LE(page, off);
+    const type = page[off+2] & 0x7f;
+    const deleted = (page[off+2] & 0x80) !== 0;
+    if (type !== 1 || len > pageSize - off - 3) return null;
+    return {len, type, deleted, data:page.slice(off+3, off+3+len)};
+  }
+  function parseBitcoinWalletDat(buffer) {
+    const a = new Uint8Array(buffer);
+    if (a.length < 96) throw new Error("Файл слишком мал для Berkeley DB wallet.dat.");
+    const magic = readU32LE(a,12);
+    const version = readU32LE(a,16);
+    const pageSize = readU32LE(a,20);
+    const root = readU32LE(a,88);
+    if (magic !== 0x00053162) throw new Error("Это не распознанный Berkeley DB wallet.dat (неверный magic).");
+    if (pageSize < 512 || pageSize > 1048576 || (pageSize & (pageSize-1)) !== 0) throw new Error("Некорректный размер страницы Berkeley DB: " + pageSize + ".");
+    if (version < 1) throw new Error("Неподдерживаемая версия Berkeley DB: " + version + ".");
+    if (a.length % pageSize !== 0) throw new Error("Размер wallet.dat не кратен размеру страницы Berkeley DB.");
+
+    const mkeys = [];
+    const ckeys = [];
+    const pageCount = a.length / pageSize;
+    for (let pageNo=1; pageNo<pageCount; pageNo++) {
+      const base = pageNo * pageSize;
+      const page = a.slice(base, base+pageSize);
+      if (readU32LE(page,8) !== pageNo) continue;
+      const type = page[25];
+      if (type !== 5 && type !== 13) continue; // B-tree leaf / hash leaf
+      const entries = readU16LE(page,20);
+      if (!entries || (entries & 1)) continue;
+      if (26 + entries*2 > pageSize) continue;
+      const offs = new Array(entries);
+      let valid = true;
+      for (let i=0;i<entries;i++) {
+        const o = readU16LE(page,26+i*2);
+        if (o < 26 || o >= pageSize) { valid=false; break; }
+        offs[i]=o;
+      }
+      if (!valid) continue;
+      for (let i=0;i<entries;i+=2) {
+        const k = bdbItem(page, offs[i], pageSize);
+        const d = bdbItem(page, offs[i+1], pageSize);
+        if (!k || !d || k.deleted || d.deleted) continue;
+        const kd = k.data, dd = d.data;
+        let pos=0;
+        let cs;
+        try { cs=compactSizeRead(kd,pos); } catch (_) { continue; }
+        const keyLen=cs.value; pos=cs.next;
+        if (keyLen > 64 || pos+keyLen > kd.length) continue;
+        const keyType = new TextDecoder().decode(kd.slice(pos,pos+keyLen));
+        pos += keyLen;
+        if (keyType === "mkey") {
+          if (pos+4 > kd.length) continue;
+          const id=readU32LE(kd,pos);
+          let q=0;
+          let v;
+          try { v=compactSizeRead(dd,q); } catch (_) { continue; }
+          const cipherLen=v.value; q=v.next;
+          if (cipherLen < 16 || cipherLen > 1024 || q+cipherLen > dd.length) continue;
+          const cipher=dd.slice(q,q+cipherLen); q+=cipherLen;
+          try { v=compactSizeRead(dd,q); } catch (_) { continue; }
+          const saltLen=v.value; q=v.next;
+          if (saltLen !== 8 || q+8+8 > dd.length) continue;
+          const salt=dd.slice(q,q+8); q+=8;
+          if (q+8 > dd.length) continue;
+          const method=readU32LE(dd,q); q+=4;
+          const iter=readU32LE(dd,q); q+=4;
+          try { v=compactSizeRead(dd,q); } catch (_) { continue; }
+          if (q+v.value > dd.length) continue;
+          mkeys.push({id,cipher,salt,method,iter});
+        } else if (keyType === "ckey") {
+          let v;
+          try { v=compactSizeRead(kd,pos); } catch (_) { continue; }
+          const pubLen=v.value; pos=v.next;
+          if ((pubLen !== 33 && pubLen !== 65) || pos+pubLen > kd.length) continue;
+          const pub=kd.slice(pos,pos+pubLen);
+          let q=0;
+          try { v=compactSizeRead(dd,q); } catch (_) { continue; }
+          const cipherLen=v.value; q=v.next;
+          if (cipherLen < 16 || cipherLen > 1024 || q+cipherLen > dd.length) continue;
+          ckeys.push({pub, cipher:dd.slice(q,q+cipherLen)});
+        }
+      }
+    }
+    if (!mkeys.length) throw new Error("В wallet.dat не найдено ни одной записи mkey.");
+    const mk=mkeys[0];
+    if (mk.method !== 0) throw new Error("Найден mkey с nDerivationMethod="+mk.method+". Текущий режим поддерживает только method=0.");
+    if (mk.salt.length !== 8 || mk.cipher.length % 16 !== 0) throw new Error("Найден mkey с некорректными salt/ciphertext.");
+    if (!Number.isSafeInteger(mk.iter) || mk.iter < 1) throw new Error("Найден mkey с некорректным nDeriveIterations.");
+    if (!ckeys.length) throw new Error("mkey найден, но записи ckey с public key не найдены; строгая проверка пароля невозможна.");
+    return {mkey:mk, ckeys, root, pageSize, pageCount};
+  }
+
+  async function loadWalletDat(file) {
+    const status=$('walletFileStatus');
+    if (!file) return;
+    try {
+      status.textContent = "Чтение wallet.dat…";
+      const buffer = await file.arrayBuffer();
+      const walletHash = hexOf(await sha256Bytes(new Uint8Array(buffer)));
+      const parsed = parseBitcoinWalletDat(buffer);
+      const mk=parsed.mkey;
+      const ck=parsed.ckeys[0];
+      $("mkeyCipher").value=hexOf(mk.cipher);
+      $("mkeySalt").value=hexOf(mk.salt);
+      $("mkeyIter").value=String(mk.iter);
+      $("mkeyMethod").value=String(mk.method);
+      $("mkeyCkey").value=hexOf(ck.cipher);
+      $("mkeyPubKey").value=hexOf(ck.pub);
+      $("targetMode").value="wallet";
+      $("targetMode").onchange();
+      walletConfigCache={key:null,cfg:null};
+      walletVerifierCache={key:null,verifier:null};
+      walletSession={id:walletHash,name:file.name,size:file.size,lastModified:file.lastModified||0,hash:walletHash,mkeyId:mk.id,ckeyCount:parsed.ckeys.length};
+      foundCandidate=null; walletUnknownReason=""; appState="IDLE";
+      status.textContent = `Загружен ${file.name}: mkey #${mk.id}, ckey=${parsed.ckeys.length}. SHA-256: ${walletHash.slice(0,16)}…`;
+      $("walletSessionInfo").textContent = `Сессия wallet: ${walletHash}\nРазмер: ${fmtBytes(file.size)} • mkey #${mk.id} • ckey: ${parsed.ckeys.length}`;
+      await loadSessionMeta();
+      log(`Wallet: ${file.name}, SHA-256=${walletHash}, mkey #${mk.id}, ckey=${parsed.ckeys.length}, iterations=${mk.iter}.`);
+      render();
+    } catch (err) {
+      status.textContent = "Ошибка wallet.dat: " + (err.message || String(err));
+      log("Wallet: " + status.textContent);
+      walletUnknownReason=status.textContent;
+      render();
+    }
   }
 
   function readWalletConfig() {
@@ -782,6 +1080,26 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
     const cfg = {cipher, salt, iter};
     walletConfigCache = {key:cacheKey, cfg};
     return cfg;
+  }
+
+  async function getWalletVerifier() {
+    const cfg = readWalletConfig();
+    const ckeyHex = $("mkeyCkey").value.trim();
+    const pubHex = $("mkeyPubKey").value.trim();
+    const key = [cfg.cipher, cfg.salt, cfg.iter, ckeyHex, pubHex].map(x => String(x)).join("|");
+    if (walletVerifierCache.key === key && walletVerifierCache.verifier) return walletVerifierCache.verifier;
+    if (!ckeyHex || !pubHex) throw new Error("Недостаточно данных для достоверной проверки: добавьте ckey ciphertext и соответствующий public key.");
+    const ckey = parseHexStrict(ckeyHex, "ckey ciphertext");
+    const pubkey = parseHexStrict(pubHex, "public key");
+    if (ckey.length < 16 || ckey.length % 16 !== 0) throw new Error("ckey ciphertext должен быть кратен 16 байтам.");
+    if (pubkey.length !== 33 && pubkey.length !== 65) throw new Error("public key должен быть 33 или 65 байт.");
+    // The ckey IV is deterministic for a given public key. Calculate it ONCE,
+    // not twice per password candidate. This is a major mobile optimization.
+    const ivHash1 = await sha256Bytes(pubkey);
+    const ivHash2 = await sha256Bytes(ivHash1);
+    const verifier = {ckey, pubkey, iv:ivHash2.slice(0,16)};
+    walletVerifierCache = {key, verifier};
+    return verifier;
   }
 
   function walletPreflight() {
@@ -827,14 +1145,12 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
       }
       if (plainMaster.length !== 32) return {status:"invalid", reason:"Расшифрованный CMasterKey должен содержать ровно 32 байта."};
 
-      const ckeyHex = $("mkeyCkey").value.trim();
-      const pubHex = $("mkeyPubKey").value.trim();
-      if (!ckeyHex || !pubHex) {
-        return {status:"unknown", reason:"Недостаточно данных для достоверной проверки: добавьте ckey ciphertext и соответствующий public key."};
+      try {
+        const verifier = await getWalletVerifier();
+        return await validateBitcoinCkeyCached(plainMaster, verifier);
+      } catch (err) {
+        return {status:"unknown", reason:err.message || String(err)};
       }
-      const ckey = parseHexStrict(ckeyHex, "ckey ciphertext");
-      const pubkey = parseHexStrict(pubHex, "public key");
-      return await validateBitcoinCkey(plainMaster, ckey, pubkey);
     }
     return {status:"invalid", reason:"Неизвестный режим."};
   }
@@ -844,6 +1160,232 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
     return result.status === "valid";
   }
 
+  function hexToBytesStrict(s) {
+    return parseHexStrict(s, "self-test vector");
+  }
+
+  async function runCryptoSelfTest() {
+    const el = $("cryptoSelfTestStatus");
+    const btn = $("cryptoSelfTest");
+    const started = performance.now();
+    btn.disabled = true;
+    el.textContent = "⏳ Проверяю SHA-256, EVP-SHA512, AES-CBC, secp256k1…";
+    const checks = [];
+    try {
+      // SHA-256 known-answer test: "abc".
+      const sha = hexOf(await sha256Bytes(utf8Encoder.encode("abc")));
+      checks.push(["SHA-256", sha === "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", sha]);
+
+      // OpenSSL EVP_BytesToKey(AES-256-CBC, SHA-512), count=1, password="test",
+      // salt=0001020304050607. These are fixed known-answer values.
+      const evp = await evpBytesToKeySHA512(utf8Encoder.encode("test"), hexToBytesStrict("0001020304050607"), 1);
+      checks.push(["EVP key", hexOf(evp.key) === "9db170135498d3e98bedf0ebcf4fe8fc7b9672a9ce5fc48d1f3ac3dcd4a86243", hexOf(evp.key)]);
+      checks.push(["EVP IV", hexOf(evp.iv) === "01ffd38143b572d6f3ec29f776a78b46", hexOf(evp.iv)]);
+
+      // Independent fallback must agree with the WASM EVP implementation.
+      const wasmEvp = await evpBytesToKeySHA512(utf8Encoder.encode("self-test"), hexToBytesStrict("0102030405060708"), 3);
+      const fallbackEvp = await evpBytesToKeySHA512Fallback(utf8Encoder.encode("self-test"), hexToBytesStrict("0102030405060708"), 3);
+      checks.push(["EVP WASM = fallback", hexOf(wasmEvp.key) === hexOf(fallbackEvp.key) && hexOf(wasmEvp.iv) === hexOf(fallbackEvp.iv), hexOf(wasmEvp.key).slice(0,16)+"…"]);
+
+      // AES-256-CBC known-answer test with PKCS#7 padding, because Web Crypto
+      // AES-CBC decrypt enforces PKCS#7. The NIST single-block ciphertext is
+      // intentionally not used directly: it has no PKCS#7 padding.
+      const aesPlain = await aesCbcDecrypt(
+        hexToBytesStrict("2b7e151628aed2a6abf7158809cf4f3c762e7160f38b4da56a784d9045190cfe"),
+        hexToBytesStrict("000102030405060708090a0b0c0d0e0f"),
+        hexToBytesStrict("36341212cfe86d8f4a94bc75d5c1a94ac875b5b710991ca77e7c11ea21791550")
+      );
+      checks.push(["AES-256-CBC", hexOf(aesPlain) === "6bc1bee22e409f96e93d7e117393172a", hexOf(aesPlain)]);
+
+      // secp256k1 generator point for private key 1.
+      checks.push(["secp256k1 compressed", derivePubHex(1n, true) === "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798", derivePubHex(1n,true)]);
+      checks.push(["secp256k1 uncompressed", derivePubHex(1n, false) === "0479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8", derivePubHex(1n,false).slice(0,16)+"…"]);
+
+      // ckey IV rule: first 16 bytes of SHA256(SHA256(pubkey)).
+      const pub1 = hexToBytesStrict("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798");
+      const h1 = await sha256Bytes(pub1), h2 = await sha256Bytes(h1);
+      checks.push(["ckey IV", hexOf(h2.slice(0,16)) === "b1cd0a4eb6d1cea5eb288fb4474ac403", hexOf(h2.slice(0,16))]);
+
+      const bad = checks.filter(x => !x[1]);
+      const ms = Math.round(performance.now() - started);
+      if (bad.length) {
+        el.textContent = `❌ НЕ ПРОЙДЕН (${bad.length}/${checks.length}) • ${ms} мс`;
+        log("Crypto self-test FAILED: " + bad.map(x=>x[0]).join(", "));
+        return false;
+      }
+      el.textContent = `✅ PASS • ${checks.length}/${checks.length} тестов • ${ms} мс`;
+      log(`Crypto self-test PASS: ${checks.length}/${checks.length} тестов.`);
+      return true;
+    } catch (err) {
+      el.textContent = "❌ ОШИБКА: " + (err.message || err);
+      log("Crypto self-test ERROR: " + (err.message || err));
+      return false;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function loadSessionMeta() {
+    const f = await idbGet(META_STORE, scopedMetaKey("found"));
+    foundCandidate = f && f.candidate != null ? f.candidate : null;
+    appState = (foundCandidate || (f && f.found === true)) ? "FOUND" : "IDLE";
+    const b = await idbGet(META_STORE, scopedMetaKey("brute"));
+    if (b && $("bruteText")) {
+      try {
+        const idx=BigInt(b.idx||0);
+        $("bruteText").textContent = b.progress >= 100 ? "Перебор завершён." : `Checkpoint восстановлен: ${fmtBig(idx)} • ${pct(b.progress).toFixed(4)}%`;
+        $("bruteProg").value = pct(b.progress)/100;
+      } catch (_) {}
+    }
+    if (foundCandidate) showFound(foundCandidate, f.source || "сохранённое состояние");
+  }
+
+  function sessionMetaForExport() {
+    return {
+      version: APP_VERSION,
+      type: "surasaki-progress",
+      exportedAt: new Date().toISOString(),
+      wallet: {id:walletSession.id,name:walletSession.name,size:walletSession.size,lastModified:walletSession.lastModified,mkeyId:walletSession.mkeyId,ckeyCount:walletSession.ckeyCount},
+      dictionary: {signature:dictionarySignature(),name:dictionaryFile?.name||"",size:dictionaryFile?.size||0,lastModified:dictionaryFile?.lastModified||0,format:"SLDB",version:dictionaryMeta?.version||7,recordCount:dictionaryMeta?.recordCountBigInt!=null?String(dictionaryMeta.recordCountBigInt):"0"},
+      entries: entries.map(e=>({key:e.key,name:e.name,selected:!!e.selected,status:e.status||"new",progress:Number(e.progress)||0,line:Number(e.line)||0,totalLines:Number(e.totalLines)||0,lastCheckpoint:Number(e.lastCheckpoint)||0})),
+      found: foundCandidate != null ? {found:true,candidate:String(foundCandidate),source:"saved",timestamp:Date.now()} : null,
+      brute: null,
+      settings: {targetMode:$("targetMode").value,perfProfile:$("perfProfile").value}
+    };
+  }
+
+  async function exportProgress() {
+    if (!walletSession.id) { log("Экспорт: сначала загрузите wallet.dat."); return; }
+    const data=sessionMetaForExport();
+    const b=await idbGet(META_STORE, scopedMetaKey("brute"));
+    if (b) data.brute={...b,idx:String(b.idx??0),nextCandidate:b.nextCandidate!=null?String(b.nextCandidate):undefined};
+    const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+    const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+    const short=walletSession.hash.slice(0,16); a.download=`Surasaki_progress_${short}.json`; a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+    log("Экспорт прогресса создан: " + a.download + (foundCandidate ? " (включает найденный пароль)" : ""));
+  }
+
+  async function importProgressFile(file) {
+    if (!walletSession.id) throw new Error("Сначала загрузите соответствующий wallet.dat.");
+    const data=JSON.parse(await file.text());
+    if (data?.type !== "surasaki-progress") throw new Error("Это не файл прогресса Surasaki.");
+    if (data?.wallet?.id !== walletSession.id) throw new Error("Этот прогресс относится к другому wallet.dat. Импорт отменён.");
+    if (!Array.isArray(data.entries)) throw new Error("В файле нет состояния словарей.");
+    const sig=dictionarySignature();
+    if (data.archive) throw new Error("Старый ZIP progress несовместим с SLDB.");
+    if (!data.dictionary?.signature || !sig || data.dictionary.signature !== sig) throw new Error("Файл прогресса относится к другому SLDB. Импорт отменён.");
+    if (data.dictionary.format !== "SLDB" || Number(data.dictionary.version) !== 7) throw new Error("Файл прогресса относится не к SLDB v7.");
+    const byKey=new Map(entries.map(e=>[e.key,e]));
+    const changed=[];
+    for(const x of data.entries){ const e=byKey.get(x.key); if(!e) continue; Object.assign(e,{selected:!!x.selected,status:x.status||"new",progress:Number(x.progress)||0,line:Number(x.line)||0,totalLines:Number(x.totalLines)||0,lastCheckpoint:Number(x.lastCheckpoint)||0}); changed.push(e); }
+    if (dictionaryMeta && entries[0]) {
+      entries[0].totalLines = Number(dictionaryMeta.recordCountBigInt);
+      entries[0].recordCountBigInt = dictionaryMeta.recordCountBigInt;
+    }
+    await saveEntries(changed);
+    if (data.brute) await idbPut(META_STORE,scopedMetaKey("brute"),{...data.brute,idx:BigInt(data.brute.idx||0)});
+    if (data.found?.found === true && typeof data.found.candidate === "string") {
+      foundCandidate = data.found.candidate;
+      appState = "FOUND";
+      await idbPut(META_STORE, scopedMetaKey("found"), {candidate:foundCandidate, found:true, source:data.found.source||"import", timestamp:data.found.timestamp||Date.now()});
+      showFound(foundCandidate, "импорт прогресса");
+      $("foundBox").insertAdjacentHTML("beforeend", `<div class="muted" style="margin-top:6px">Пароль восстановлен из сохранённого прогресса для этого wallet.dat.</div>`);
+    } else {
+      foundCandidate = null;
+      appState = "IDLE";
+      await idbPut(META_STORE, scopedMetaKey("found"), {found:false, source:"import", timestamp:Date.now()});
+    }
+    render();
+    log(`Импорт прогресса выполнен: применено ${changed.length} словарей.`);
+  }
+
+  /* ========== BENCHMARK ========== */
+  async function benchmarkSelected() {
+    if (processing || bruteProcessing) {
+      log("Benchmark: сначала остановите текущий поиск.");
+      return;
+    }
+    if ($("targetMode").value === "none") {
+      $("benchmarkResult").textContent = "Выберите режим проверки, иначе benchmark ничего не измерит.";
+      return;
+    }
+    if ($("targetMode").value === "wallet") {
+      try { walletPreflight(); }
+      catch (err) {
+        $("benchmarkResult").textContent = "Wallet: " + (err.message || String(err));
+        return;
+      }
+    }
+    const e = entries.find(x => x.selected && x.status !== "done") || entries.find(x => x.selected) || entries[0];
+    if (!e) {
+      $("benchmarkResult").textContent = "Сначала выберите и просканируйте словарь.";
+      return;
+    }
+
+    const SAMPLE = 100;
+    const started = performance.now();
+    let count = 0;
+    let invalid = 0, unknown = 0, valid = 0;
+    let lastCandidate = "";
+    $("benchmarkResult").textContent = `Benchmark: ${e.name} — первые ${SAMPLE} строк…`;
+    log(`Benchmark: ${e.name}, выборка до ${SAMPLE} строк. Checkpoint не изменяется.`);
+
+    let reader = null;
+    try {
+      const stream = await createLineStream(e);
+      reader = stream.getReader();
+      while (count < SAMPLE) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        const candidate = value == null ? "" : String(value);
+        lastCandidate = candidate;
+        const r = await checkCandidateDetailed(candidate);
+        count++;
+        if (r.status === "valid") valid++;
+        else if (r.status === "unknown") unknown++;
+        else invalid++;
+        if ((count & 15) === 0) {
+          const sec = Math.max(0.001, (performance.now() - started) / 1000);
+          const speed = count / sec;
+          $("benchmarkResult").textContent = `Benchmark: ${count}/${SAMPLE} • ${speed.toFixed(1)} кандидата/с`;
+          await new Promise(r => setTimeout(r, 0));
+        }
+      }
+    } catch (err) {
+      $("benchmarkResult").textContent = "Ошибка benchmark: " + (err.message || String(err));
+      log("Benchmark: " + (err.message || String(err)));
+      return;
+    } finally {
+      if (reader) { try { await reader.cancel(); } catch (_) {} try { reader.releaseLock(); } catch (_) {} }
+    }
+
+    const sec = Math.max(0.001, (performance.now() - started) / 1000);
+    const speed = count / sec;
+    const cfg = $("targetMode").value === "wallet" ? readWalletConfig() : null;
+    const perCandidate = count ? sec / count : 0;
+    const formatDuration = seconds => {
+      if (!isFinite(seconds)) return "—";
+      if (seconds < 60) return seconds.toFixed(1) + " с";
+      if (seconds < 3600) return (seconds / 60).toFixed(1) + " мин";
+      if (seconds < 86400) return (seconds / 3600).toFixed(1) + " ч";
+      return (seconds / 86400).toFixed(1) + " д";
+    };
+    const estimate = cfg ? formatDuration(perCandidate * 1000000) : "—";
+    $("benchmarkResult").textContent = count
+      ? `⚡ ${speed.toFixed(1)} кандидата/с • ${sec.toFixed(2)} с за ${count} • INVALID ${invalid}, UNKNOWN ${unknown}, VALID ${valid}` +
+        (cfg ? ` • 1 млн ≈ ${estimate}` : "")
+      : "В выбранном словаре нет строк для benchmark.";
+    $("bruteInfo").textContent = count
+      ? `Benchmark
+Словарь: ${e.name}
+Последний кандидат: ${lastCandidate}
+Скорость: ${speed.toFixed(1)} кандидата/с
+Checkpoint: не изменён`
+      : "";
+    log(count ? `Benchmark готов: ${speed.toFixed(1)} кандидата/с, ${count} строк, ${sec.toFixed(2)} с.` : "Benchmark: словарь пуст.");
+  }
+
   /* ========== PROCESS ONE DICTIONARY ========== */
   async function processEntry(e) {
     e.status = "running";
@@ -851,21 +1393,15 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
     await saveEntry(e);
     render();
 
-    const lineStream = await createLineStream(e);
-    const reader = lineStream.getReader();
     let lineNo = e.line || 0;
+    const lineStream = await createLineStream(e, lineNo);
+    const reader = lineStream.getReader();
     let processedInSession = 0;
-    const CHECKPOINT_EVERY = 4096;
+    const PS = perfSettings();
+    const CHECKPOINT_EVERY = PS.checkpointEvery;
     let totalEstimate = e.totalLines || 0;
 
     try {
-      // Resume must replay compressed streams from a safe line checkpoint.
-      for (let i = 0; i < lineNo; i++) {
-        const skipped = await reader.read();
-        if (skipped.done) { lineNo = i; break; }
-        if ((i & 4095) === 0) await new Promise(r => setTimeout(r, 0));
-      }
-
       sessionStats.startTs = sessionStats.startTs || Date.now();
       sessionStats.lastTs = Date.now();
       sessionStats.lastCount = sessionStats.candidates;
@@ -888,11 +1424,31 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
         processedInSession++;
         sessionStats.candidates++;
 
+        // Paint the live candidate only occasionally; DOM work for every line
+        // can be more expensive than the crypto itself on an iPhone.
+        const startedCandidateAt = performance.now();
+        if (processedInSession <= 2 || performance.now() - lastLivePaint > 220) {
+          lastLivePaint = performance.now();
+          $("progressText").textContent = `● ${e.name} • проверяется строка ${fmt(lineNo)}…`;
+          $("currentInfo").textContent = `Строка: ${fmt(lineNo)}\nКандидат: ${candidate}\nПрофиль: ${PS.name}`;
+        }
+
         const result = await checkCandidateDetailed(candidate);
+        const candidateMs = performance.now() - startedCandidateAt;
+        if (candidateMs > 1000) log(`Медленная проверка: строка ${fmt(lineNo)} заняла ${(candidateMs/1000).toFixed(2)} с.`);
+        if ((processedInSession % PS.uiEvery) === 0 || processedInSession <= 2 || performance.now() - lastLivePaint > 250) {
+          const elapsed = Math.max(0.001, (Date.now() - sessionStats.startTs) / 1000);
+          const speed = Math.round(processedInSession / elapsed);
+          updateLiveProgress(e, lineNo, processedInSession);
+          updateRowProgress(e);
+          $("bruteInfo").textContent = `Текущий: ${candidate}\nСкорость: ${fmt(speed)}/с`;
+          lastLivePaint = performance.now();
+        }
+        await adaptiveYield(PS.batchMs);
         if (result.status === "valid") {
           foundCandidate = candidate;
           appState = "FOUND";
-          await idbPut(META_STORE, "found", {candidate, source:e.name, timestamp:Date.now()});
+          await idbPut(META_STORE, scopedMetaKey("found"), {candidate, source:e.name, timestamp:Date.now()});
           showFound(candidate, e.name);
           e.status = "done";
           e.progress = 100;
@@ -950,6 +1506,11 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
     const eta = speed > 0 && left > 0 ? formatEta(left / speed) : "—";
 
     $("prog").value = e.progress / 100;
+    if ($("liveSpeed")) $("liveSpeed").textContent = fmt(speed);
+    if ($("liveCount")) $("liveCount").textContent = fmt(sessionStats.candidates);
+    if ($("liveProgress")) $("liveProgress").textContent = pct(e.progress).toFixed(1) + "%";
+    if ($("liveStatus")) $("liveStatus").textContent = `Проверяется: ${e.name}`;
+    if ($("liveDot")) $("liveDot").classList.add("running");
     $("progressText").textContent =
       `▶ ${e.name}  •  ${pct(e.progress).toFixed(2)}%  •  строк: ${fmt(lineNo)}` +
       (e.totalLines ? ` / ~${fmt(e.totalLines)}` : "");
@@ -1036,9 +1597,10 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
     $("stDone").textContent = fmt(done);
     $("stRun").textContent = fmt(run);
     $("stErr").textContent = fmt(err);
-    $("archiveInfo").textContent = zipFile
-      ? `Архив: ${zipFile.name}  •  ${fmtBytes(zipFile.size)}  •  словарей: ${fmt(entries.length)}  •  завершено: ${fmt(done)}`
+    $("archiveInfo").textContent = dictionaryFile && dictionaryMeta
+      ? `Файл: ${dictionaryFile.name}  •  ${fmtBytes(dictionaryFile.size)}  •  SLDB v${dictionaryMeta.version}  •  записей: ${dictionaryMeta.recordCountBigInt.toLocaleString("ru-RU")}  •  завершено: ${fmt(done)}`
       : "";
+    if ($("walletSessionInfo") && walletSession.id) $("walletSessionInfo").textContent = `Сессия: ${walletSession.hash.slice(0,16)}… • ${walletSession.name} • ${fmtBytes(walletSession.size)}`;
     $("state").textContent =
       `Состояние: ${appState}\n` +
       `Выбрано: ${fmt(selected)} / ${fmt(entries.length)}\n` +
@@ -1067,8 +1629,8 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
     if ($("targetMode").value === "wallet") {
       try { walletPreflight(); } catch (err) { walletUnknownReason = err.message || String(err); appState = "IDLE"; log("Wallet: " + walletUnknownReason); render(); return; }
     }
-    if (!zipFile && entries.length === 0) {
-      log("Сначала выберите ZIP или TXT и просканируйте.");
+    if (!dictionaryFile || entries.length === 0) {
+      log("Сначала выберите SLDB v7 и проверьте бинарный словарь.");
       return;
     }
     processing = true;
@@ -1124,6 +1686,8 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
     $("progressText").textContent = stopped
       ? "Пауза. После «Запустить / продолжить» очередь продолжится с checkpoint."
       : "Все выбранные незавершённые словари обработаны.";
+    if ($("liveDot")) $("liveDot").classList.remove("running");
+    if ($("liveStatus")) $("liveStatus").textContent = foundCandidate ? "Пароль найден" : (stopped ? "Пауза" : "Очередь завершена");
     log(stopped ? "Пауза запрошена." : "Очередь завершена.");
   }
 
@@ -1153,23 +1717,19 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
     return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ") + " (очень большое)";
   }
 
-  $("calcSpace").onclick = () => {
+  function updateSearchSpaceUI() {
     try {
       const { total, chars, minL, maxL } = calcSearchSpace();
-    const warn = $("spaceWarn");
-    warn.style.display = "block";
-    if (total > 10n ** 12n) {
-      warn.textContent = `⚠ Пространство ≈ ${formatBig(total)} комбинаций (алфавит ${chars.length}, длины ${minL}–${maxL}). Практически нереализуемо.`;
-    } else if (total > 10n ** 9n) {
-      warn.textContent = `Пространство ≈ ${formatBig(total)} комбинаций. Потребуется много времени.`;
-    } else {
-      warn.textContent = `Пространство ≈ ${formatBig(total)} комбинаций (алфавит: ${chars.length} символов, длины ${minL}–${maxL}).`;
-      }
-    } catch (err) {
-      $("spaceWarn").style.display = "block";
-      $("spaceWarn").textContent = "Ошибка: " + (err.message || err);
-    }
-  };
+      const warn=$("spaceWarn"); warn.style.display="block";
+      if (total > 10n ** 12n) warn.textContent=`⚠ Пространство ≈ ${formatBig(total)} комбинаций (алфавит ${chars.length}, длины ${minL}–${maxL}).`;
+      else if (total > 10n ** 9n) warn.textContent=`Пространство ≈ ${formatBig(total)} комбинаций. Потребуется много времени.`;
+      else warn.textContent=`Пространство ≈ ${formatBig(total)} комбинаций (алфавит: ${chars.length}, длины ${minL}–${maxL}).`;
+    } catch(err) { $("spaceWarn").style.display="block"; $("spaceWarn").textContent="Ошибка: "+(err.message||err); }
+  }
+  $("alphabet").addEventListener("input", updateSearchSpaceUI);
+  $("minLen").addEventListener("input", updateSearchSpaceUI);
+  $("maxLen").addEventListener("input", updateSearchSpaceUI);
+
 
   async function runBrute() {
     if (bruteProcessing) return;
@@ -1189,7 +1749,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
     appState = "RUNNING";
 
     // Resume support via IndexedDB
-    let state = await idbGet(META_STORE, "brute") || { idx: 0n, len: minL, progress: 0 };
+    let state = await idbGet(META_STORE, scopedMetaKey("brute") ) || { idx: 0n, len: minL, progress: 0 };
     try { state.idx = BigInt(state.idx); } catch (_) { state.idx = 0n; }
     state.len = Number(state.len);
     if (!Number.isInteger(state.len) || state.len < minL || state.len > maxL + 1) {
@@ -1205,9 +1765,14 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
 
     const n = BigInt(chars.length);
     let processed = 0n;
-    const CHECKPOINT = 8192n;
+    const PS = perfSettings();
+    const CHECKPOINT = BigInt(PS.checkpointEvery);
+    lastYieldAt = performance.now();
 
     log(`Перебор: алфавит ${chars.length}, длины ${minL}–${maxL}, старт с len=${state.len} idx=${state.idx}`);
+    if ($("targetMode").value === "wallet") {
+      try { log(`Wallet: каждый кандидат проходит EVP_BytesToKey-SHA512 (${readWalletConfig().iter} итераций) + AES-CBC; UI обновляется каждые 64 кандидата.`); } catch (_) {}
+    }
 
     outer:
     for (let len = state.len; len <= maxL; len++) {
@@ -1215,7 +1780,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
       let idx = (len === state.len) ? state.idx : 0n;
       while (idx < space) {
         if (bruteStopped) {
-          await idbPut(META_STORE, "brute", { idx, len, progress: total > 0n ? Number((processed * 10000n) / total) / 100 : 0, nextCandidate: idx.toString(), timestamp: Date.now() });
+          await idbPut(META_STORE, scopedMetaKey("brute"), { idx, len, progress: total > 0n ? Number((processed * 10000n) / total) / 100 : 0, nextCandidate: idx.toString(), timestamp: Date.now() });
           $("bruteText").textContent = "Пауза. Можно продолжить.";
           break outer;
         }
@@ -1235,12 +1800,31 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
           foundCandidate = cand;
           showFound(cand, "brute-force");
           bruteStopped = true;
-          await idbPut(META_STORE, "brute", { idx: idx + 1n, len, progress: 100, nextCandidate: (idx + 1n).toString(), timestamp: Date.now() });
+          await idbPut(META_STORE, scopedMetaKey("brute"), { idx: idx + 1n, len, progress: 100, nextCandidate: (idx + 1n).toString(), timestamp: Date.now() });
           appState = "FOUND";
           break outer;
         }
 
         idx++;
+        if ((processed % BigInt(PS.uiEvery)) === 0n) {
+          const progLive = total > 0n ? Number((processed * 10000n) / total) / 100 : 0;
+          $("bruteProg").value = progLive / 100;
+          const elapsedLive = Math.max(0.001, (Date.now() - sessionStats.startTs) / 1000);
+          const speedLive = Math.round(Number(processed) / elapsedLive);
+          $("bruteText").textContent = `▶ len=${len}  ${progLive.toFixed(4)}%  •  ${fmt(Number(processed))}  •  ${fmt(speedLive)}/с`;
+          if ($("liveSpeed")) $("liveSpeed").textContent = fmt(speedLive);
+          if ($("liveCount")) $("liveCount").textContent = fmt(Number(processed));
+          if ($("liveProgress")) $("liveProgress").textContent = progLive.toFixed(2) + "%";
+          if ($("liveStatus")) $("liveStatus").textContent = `Перебор: длина ${len}`;
+          if ($("liveDot")) $("liveDot").classList.add("running");
+          if ($("bruteLiveSpeed")) $("bruteLiveSpeed").textContent = fmt(speedLive);
+          if ($("bruteLiveCount")) $("bruteLiveCount").textContent = fmt(Number(processed));
+          if ($("bruteLiveProgress")) $("bruteLiveProgress").textContent = progLive.toFixed(2) + "%";
+          if ($("bruteLiveStatus")) $("bruteLiveStatus").textContent = `Перебор: длина ${len}`;
+          if ($("bruteLiveDot")) $("bruteLiveDot").classList.add("running");
+          $("bruteInfo").textContent = `Текущий: ${cand}`;
+        }
+        await adaptiveYield(PS.batchMs);
         if ((processed % CHECKPOINT) === 0n) {
           const prog = total > 0n ? Number((processed * 10000n) / total) / 100 : 0;
           $("bruteProg").value = prog / 100;
@@ -1248,7 +1832,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
           const speed = elapsed > 0.3 ? Math.round(Number(processed) / elapsed) : 0;
           $("bruteText").textContent = `▶ len=${len}  ${prog.toFixed(4)}%  •  ${fmt(Number(processed))}  •  ${fmt(speed)}/с`;
           $("bruteInfo").textContent = `Текущий: ${cand}\nCheckpoint сохранён`;
-          await idbPut(META_STORE, "brute", { idx, len, progress: prog, nextCandidate: idx.toString(), timestamp: Date.now() });
+          await idbPut(META_STORE, scopedMetaKey("brute"), { idx, len, progress: prog, nextCandidate: idx.toString(), timestamp: Date.now() });
           await new Promise(r => setTimeout(r, 0));
         }
       }
@@ -1258,7 +1842,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
     if (!bruteStopped) {
       $("bruteProg").value = 1;
       $("bruteText").textContent = "Перебор завершён.";
-      await idbPut(META_STORE, "brute", { idx: 0n, len: maxL + 1, progress: 100, timestamp: Date.now() });
+      await idbPut(META_STORE, scopedMetaKey("brute"), { idx: 0n, len: maxL + 1, progress: 100, timestamp: Date.now() });
       appState = "DONE";
     } else if (foundCandidate) {
       appState = "FOUND";
@@ -1266,6 +1850,10 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
       appState = "PAUSED";
     }
     bruteProcessing = false;
+    if ($("liveDot")) $("liveDot").classList.remove("running");
+    if ($("liveStatus")) $("liveStatus").textContent = foundCandidate ? "Пароль найден" : (bruteStopped ? "Пауза" : "Перебор завершён");
+    if ($("bruteLiveDot")) $("bruteLiveDot").classList.remove("running");
+    if ($("bruteLiveStatus")) $("bruteLiveStatus").textContent = foundCandidate ? "Пароль найден" : (bruteStopped ? "Пауза" : "Перебор завершён");
   }
 
   /* ========== EVENT HANDLERS ========== */
@@ -1279,47 +1867,78 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
     };
   });
 
+  $("perfProfile").onchange = () => { log("Профиль: " + perfSettings().name + "."); };
+
   $("targetMode").onchange = () => {
     $("targetExact").style.display = $("targetMode").value === "exact" ? "block" : "none";
     $("targetHash").style.display = $("targetMode").value === "sha256" ? "block" : "none";
     $("targetWallet").style.display = $("targetMode").value === "wallet" ? "block" : "none";
   };
 
-  $("scan").onclick = async () => {
-    const f = $("zip").files[0];
-    if (!f) { log("Сначала выберите файл."); return; }
-    zipFile = f;
-    try {
-      log("Сканирование: " + f.name);
-      if (f.name.toLowerCase().endsWith(".zip")) {
-        entries = await parseZip(f);
-      } else {
-        // Single text file treated as one dictionary
-        entries = [{
-          name: f.name, method: 0, csize: f.size, usize: f.size,
-          local: 0, crc: 0, selected: true, progress: 0, status: "new",
-          line: 0, totalLines: 0, lastCheckpoint: 0,
-          key: f.name + "|single|" + f.size,
-          single: true
-        }];
-        // For single file we override the stream source
-        zipFile = f;
-      }
-      await loadAllEntryStates();
-      render();
-      log("Найдено словарей: " + entries.length);
-    } catch (err) {
-      log("Ошибка: " + (err.message || err));
-    }
+  $("walletFile").onchange = async () => {
+    const f = $("walletFile").files[0];
+    await loadWalletDat(f);
   };
+
+  async function scanSelectedFile() {
+    const f = $("dictionaryFile").files[0];
+    if (!f) { log("Сначала выберите бинарный словарь SLDB."); return; }
+    dictionaryFile = f;
+    dictionaryMeta = null;
+    entries = [];
+    walletUnknownReason = "";
+    try {
+      log("Проверка SLDB: " + f.name + " (" + fmtBytes(f.size) + ")");
+      const reader = new SLDBReader(f);
+      await reader.open();
+      const recordCountBigInt = reader.recordCount;
+      const version = reader.version;
+      await reader.close();
+      dictionaryMeta = {version, flags:reader.flags, recordCountBigInt};
+      if (recordCountBigInt > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new Error("SLDB содержит больше Number.MAX_SAFE_INTEGER записей. Текущая checkpoint-модель программы не может безопасно хранить такой номер строки.");
+      }
+      const recordCount = Number(recordCountBigInt);
+      const key = dictionarySignature();
+      entries = [{
+        name: f.name,
+        selected: true,
+        progress: 0,
+        status: "new",
+        line: 0,
+        totalLines: recordCount,
+        recordCountBigInt,
+        lastCheckpoint: 0,
+        usize: f.size,
+        key,
+        format: "SLDB",
+        version: 7,
+        single: false
+      }];
+      await loadAllEntryStates();
+      // Header-derived count is authoritative even when an older state exists.
+      entries[0].totalLines = recordCount;
+      entries[0].recordCountBigInt = recordCountBigInt;
+      render();
+      log(`✓ SLDB v7 корректен. Записей: ${recordCountBigInt.toLocaleString("ru-RU")}. Готов к обработке.`);
+    } catch (err) {
+      entries = [];
+      dictionaryMeta = null;
+      render();
+      log("Ошибка SLDB: " + (err.message || err));
+    }
+  }
+
+  $("scan").onclick = () => scanSelectedFile();
+  $("dictionaryFile").onchange = () => scanSelectedFile();
 
   $("clearAll").onclick = async () => {
     if (!confirm("Сбросить все checkpoint и выбор?")) return;
-    await idbClear(STORE);
-    await idbClear(META_STORE);
+    await idbDeletePrefix(STORE, sessionPrefix());
+    await idbDeletePrefix(META_STORE, sessionPrefix());
     entries.forEach(e => {
       e.progress = 0; e.status = "new"; e.selected = false;
-      e.line = 0; e.totalLines = 0;
+      e.line = 0; e.totalLines = dictionaryMeta && dictionaryMeta.recordCountBigInt <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(dictionaryMeta.recordCountBigInt) : e.totalLines;
     });
     foundCandidate = null;
     appState = "IDLE";
@@ -1341,6 +1960,11 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
   };
 
   $("start").onclick = () => runQueue();
+  $("benchmark").onclick = () => benchmarkSelected();
+  $("cryptoSelfTest").onclick = () => runCryptoSelfTest();
+  $("exportProgress").onclick = () => exportProgress().catch(err => log("Экспорт: " + (err.message || err)));
+  $("importProgress").onclick = () => { $("progressFile").value=""; $("progressFile").click(); };
+  $("progressFile").onchange = async () => { const f=$("progressFile").files[0]; if(!f)return; try{await importProgressFile(f);}catch(err){log("Импорт: " + (err.message||err)); alert("Импорт отменён: " + (err.message||err));} };
   $("pause").onclick = () => { stopped = true; log("Пауза запрошена…"); };
   $("skip").onclick = () => {
     skipCurrent = true;
@@ -1380,7 +2004,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
       if (r.status === "valid") {
         foundCandidate = cand;
         appState = "FOUND";
-        await idbPut(META_STORE, "found", {candidate:cand, source:"manual/test", timestamp:Date.now()});
+        await idbPut(META_STORE, scopedMetaKey("found"), {candidate:cand, source:"manual/test", timestamp:Date.now()});
         showFound(cand, "manual/test");
         render();
       }
@@ -1391,23 +2015,24 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
   };
 
   /* ========== INIT ========== */
+  updateSearchSpaceUI();
   (async function init() {
     try {
       if (!("crypto" in self) || !crypto.subtle) log("Ошибка: Web Crypto API недоступен.");
       if (!("ReadableStream" in self)) log("Ошибка: ReadableStream недоступен.");
       if (!("Blob" in self) || !Blob.prototype.slice) log("Ошибка: Blob.slice недоступен.");
       if (!("BigInt" in self)) log("Ошибка: BigInt недоступен — перебор невозможен.");
+      try { await initEvpWasm(); log("Fast crypto: EVP_BytesToKey-SHA512 WebAssembly готов."); }
+      catch (e) { log("Fast crypto: WebAssembly недоступен, будет использован медленный резервный путь. Причина: " + (e.message || e)); }
+      await runCryptoSelfTest();
       await openDB();
-      const f = await idbGet(META_STORE, "found");
-      if (f && f.candidate != null) {
-        foundCandidate = f.candidate;
-        appState = "FOUND";
-        showFound(f.candidate, f.source || "сохранённое состояние");
-      }
+      await loadSessionMeta();
       log("IndexedDB checkpoint готов. Состояние сохраняется локально.");
       render();
     } catch (e) {
-      log("Инициализация: " + (e.message || e));
+      db = null;
+      log("Инициализация: IndexedDB недоступен; работа продолжится без checkpoint. Причина: " + (e.message || e));
+      render();
     }
   })();
 })();
