@@ -804,6 +804,217 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
   let evpWasmPromise = null;
   let evpWasmSync = null;
   let walletHotRuntime = null;
+  let activeBrutePool = null;
+  let activeDictionaryPool = null;
+
+  // Dedicated-worker EVP engine. Each Worker owns an independent WASM instance,
+  // so Safari can execute several EVP chains on separate CPU cores. AES/secp256k1
+  // validation remains on the main thread because it is <1% of the measured time.
+  const EVP_WORKER_SOURCE = `
+    let wasm = null, mem = null, evp = null, salt = null, iter = 0, encoder = new TextEncoder();
+    self.onmessage = async (ev) => {
+      const m = ev.data || {};
+      try {
+        if (m.type === "init") {
+          const inst = await WebAssembly.instantiate(m.wasm, {});
+          const ex = inst.instance.exports;
+          if (!ex.memory || typeof ex.evp_sha512 !== "function") throw new Error("WASM EVP init failed");
+          wasm = inst.instance; mem = new Uint8Array(ex.memory.buffer); evp = ex.evp_sha512;
+          salt = new Uint8Array(m.salt); iter = m.iter >>> 0;
+          self.postMessage({type:"ready"});
+          return;
+        }
+        if (m.type === "batch") {
+          const out = new Array(m.items.length);
+          const PASS_PTR = 10000, SALT_PTR = 11024, OUT_PTR = 12048;
+          for (let i=0; i<m.items.length; i++) {
+            const item = m.items[i];
+            const pass = encoder.encode(item.cand);
+            if (pass.length > 248) throw new Error("Candidate UTF-8 length > 248 bytes");
+            mem.set(pass, PASS_PTR); mem.set(salt, SALT_PTR);
+            evp(PASS_PTR, pass.length, SALT_PTR, iter, OUT_PTR);
+            out[i] = {seq:item.seq, idx:item.idx, cand:item.cand,
+              key:mem.slice(OUT_PTR, OUT_PTR+32), iv:mem.slice(OUT_PTR+32, OUT_PTR+48)};
+          }
+          const transfer=[];
+          for (const r of out) { transfer.push(r.key.buffer, r.iv.buffer); }
+          self.postMessage({type:"batchResult", id:m.id, items:out}, transfer);
+          return;
+        }
+      } catch (err) {
+        self.postMessage({type:"error", id:m.id, message:err && err.message ? err.message : String(err)});
+      }
+    };
+  `;
+
+  class WalletEvpWorkerPool {
+    constructor(wasmBytes, cfg, count) {
+      this.count = count; this.workers = []; this.id = 0; this.ready = 0;
+      this.inFlight = 0; this.resultQueue = []; this.resultWaiters = [];
+      this.closed = false;
+      this.waitReady = new Promise((resolve,reject)=>{this._readyResolve=resolve;this._readyReject=reject;});
+      this.wasmBytes = wasmBytes;
+      const blob = new Blob([EVP_WORKER_SOURCE], {type:"application/javascript"});
+      this.url = URL.createObjectURL(blob);
+      for (let i=0;i<count;i++) {
+        const w = new Worker(this.url);
+        w.onmessage = e => this._message(w,e.data||{});
+        w.onerror = e => this._fail(new Error(e.message || "Worker error"));
+        this.workers.push(w);
+      }
+    }
+    configure(salt, iter) { this._salt=salt.slice(); this._iter=iter; }
+    async init() {
+      for (const w of this.workers) {
+        const copy=this.wasmBytes.slice();
+        w.postMessage({type:"init", wasm:copy.buffer, salt:this._salt, iter:this._iter}, [copy.buffer]);
+      }
+      await this.waitReady;
+    }
+    _message(w,m) {
+      if (m.type === "ready") { if (++this.ready === this.count) this._readyResolve(); return; }
+      if (m.type === "batchResult") {
+        this.inFlight--;
+        if (this.resultWaiters.length) this.resultWaiters.shift()(m);
+        else this.resultQueue.push(m);
+        return;
+      }
+      if (m.type === "error") this._fail(new Error(m.message||"Worker failure"));
+    }
+    _fail(err) {
+      if (this.closed) return;
+      this.closed=true;
+      if (this._readyReject) this._readyReject(err);
+      while(this.resultWaiters.length) this.resultWaiters.shift()(Promise.reject(err));
+    }
+    submit(items) {
+      if (this.closed) throw new Error("Worker pool closed");
+      const w=this.workers[this.id++ % this.count], id=this.id;
+      this.inFlight++;
+      w.postMessage({type:"batch", id, items});
+      return id;
+    }
+    nextResult() {
+      if (this.resultQueue.length) return Promise.resolve(this.resultQueue.shift());
+      if (this.closed) return Promise.reject(new Error("Worker pool closed"));
+      return new Promise((resolve,reject)=>this.resultWaiters.push((m)=>m instanceof Promise ? m.then(resolve,reject) : resolve(m)));
+    }
+    close() {
+      if (this.closed) return;
+      this.closed=true;
+      for (const w of this.workers) { try { w.terminate(); } catch (_) {} }
+      try { URL.revokeObjectURL(this.url); } catch (_) {}
+      while(this.resultWaiters.length) this.resultWaiters.shift()({type:"closed"});
+    }
+  }
+
+  function workerCountForBrute() {
+    const hc = Number(navigator.hardwareConcurrency) || 2;
+    // Four workers is a deliberate mobile ceiling: on iPhone/Safari it avoids
+    // turning the UI into a context-switching/thermal experiment.
+    return Math.max(2, Math.min(4, Math.floor(hc)));
+  }
+
+  function getEmbeddedWasmBytes() {
+    return Uint8Array.from(atob(EVP_WASM_B64), c => c.charCodeAt(0));
+  }
+
+  async function runParallelWalletSegment(chars, n, len, startIdx, space, processed, total, PS) {
+    const runtime=walletHotRuntime;
+    if (!runtime || !runtime.wasm) throw new Error("Wallet crypto runtime не подготовлен.");
+    const count=workerCountForBrute();
+    const pool=new WalletEvpWorkerPool(getEmbeddedWasmBytes(), runtime.cfg, count);
+    pool.configure(runtime.cfg.salt, runtime.cfg.iter);
+    activeBrutePool=pool;
+    await pool.init();
+    log(`⚡ Parallel EVP: ${count} Worker × WASM, основной поток сохраняет AES/secp256k1 и checkpoint.`);
+
+    const BATCH=32;
+    const WINDOW=count*2;
+    let nextIdx=startIdx;
+    let committedIdx=startIdx;
+    let seqNext=0, seqCommit=0;
+    let dispatched=0, completed=0;
+    const pending=new Map();
+
+    const makeBatch=()=>{
+      const items=[];
+      for(let k=0;k<BATCH && nextIdx<space;k++,nextIdx++){
+        let x=nextIdx, cand="";
+        for(let i=0;i<len;i++){ cand=chars[Number(x % n)]+cand; x=x/n; }
+        items.push({seq:seqNext++,idx:(nextIdx).toString(),cand});
+      }
+      return items;
+    };
+
+    try {
+      while (completed < dispatched || (!bruteStopped && nextIdx < space)) {
+        if (bruteStopped) break;
+        while (!bruteStopped && (dispatched-completed)<WINDOW && nextIdx<space) {
+          const items=makeBatch();
+          if(!items.length) break;
+          pool.submit(items); dispatched++;
+        }
+        if (completed>=dispatched) { if(nextIdx>=space) break; await yieldToBrowser(); continue; }
+
+        const result=await pool.nextResult();
+        if (result && result.type === "closed") break;
+        completed++;
+        for(const item of result.items) pending.set(item.seq,item);
+
+        while(pending.has(seqCommit)) {
+          const item=pending.get(seqCommit); pending.delete(seqCommit); seqCommit++;
+          if (bruteStopped) break;
+          const dk={key:new Uint8Array(item.key),iv:new Uint8Array(item.iv)};
+          let plain;
+          try { plain=await aesCbcDecrypt(dk.key, dk.iv, runtime.cfg.cipher); }
+          catch (_) { plain=null; }
+          let hit=false;
+          if(plain && plain.length===32){
+            try { const vr=await validateBitcoinCkeyCached(plain,runtime.verifier); hit=vr.status==="valid"; }
+            catch (_) {}
+          }
+          processed++;
+          committedIdx=BigInt(item.idx)+1n;
+          sessionStats.candidates++;
+          if(hit){
+            foundCandidate=item.cand;
+            showFound(item.cand,"brute-force");
+            bruteStopped=true; appState="FOUND";
+            await idbPut(META_STORE, scopedMetaKey("brute"), {idx:committedIdx,len,progress:100,nextCandidate:committedIdx.toString(),timestamp:Date.now()});
+            break;
+          }
+          if((processed % BigInt(PS.uiEvery))===0n){
+            const absoluteProcessed=processed;
+            const prog=total>0n ? Number((absoluteProcessed*10000n)/total)/100 : 0;
+            const elapsed=Math.max(.001,(Date.now()-sessionStats.startTs)/1000);
+            const speed=Math.round(Number(absoluteProcessed)/elapsed);
+            $("bruteProg").value=prog/100;
+            $("bruteText").textContent=`▶ len=${len}  ${prog.toFixed(4)}%  •  ${fmt(Number(absoluteProcessed))}  •  ${fmt(speed)}/с  •  ⚡ ${count}W`;
+            $("bruteInfo").textContent=`Текущий: ${item.cand}`;
+            if($("liveSpeed")) $("liveSpeed").textContent=fmt(speed);
+            if($("liveCount")) $("liveCount").textContent=fmt(Number(absoluteProcessed));
+            if($("liveProgress")) $("liveProgress").textContent=prog.toFixed(2)+"%";
+            if($("liveStatus")) $("liveStatus").textContent=`Перебор: длина ${len} • ${count}W`;
+            if($("bruteLiveSpeed")) $("bruteLiveSpeed").textContent=fmt(speed);
+            if($("bruteLiveCount")) $("bruteLiveCount").textContent=fmt(Number(absoluteProcessed));
+            if($("bruteLiveProgress")) $("bruteLiveProgress").textContent=prog.toFixed(2)+"%";
+            if($("bruteLiveStatus")) $("bruteLiveStatus").textContent=`Перебор: длина ${len} • ${count}W`;
+            await adaptiveYield(PS.batchMs);
+          }
+          if((processed % BigInt(PS.checkpointEvery))===0n){
+            const prog=total>0n ? Number((processed*10000n)/total)/100 : 0;
+            await idbPut(META_STORE, scopedMetaKey("brute"), {idx:committedIdx,len,progress:prog,nextCandidate:committedIdx.toString(),timestamp:Date.now()});
+            $("bruteInfo").textContent=`Текущий: ${item.cand}\nCheckpoint сохранён`;
+          }
+        }
+      }
+      return {nextIdx:committedIdx, processed, found:!!foundCandidate};
+    } finally {
+      pool.close();
+      if(activeBrutePool===pool) activeBrutePool=null;
+    }
+  }
   function initEvpWasm() {
     if (evpWasmPromise) return evpWasmPromise;
     evpWasmPromise = (async () => {
@@ -1511,95 +1722,136 @@ Checkpoint: не изменён`
   }
 
   /* ========== PROCESS ONE DICTIONARY ========== */
-  async function processEntry(e) {
+  async function processEntryParallelWallet(e) {
     e.status = "running";
     e.lastCheckpoint = Date.now();
     await saveEntry(e);
     render();
 
-    let lineNo = e.line || 0;
-    const lineStream = await createLineStream(e, lineNo);
-    const reader = lineStream.getReader();
-    let processedInSession = 0;
+    let lineNo = Number(e.line || 0);
+    const totalEstimate = Number(e.totalLines || (dictionaryMeta ? dictionaryMeta.recordCountBigInt : 0));
     const PS = perfSettings();
-    const CHECKPOINT_EVERY = PS.checkpointEvery;
-    let totalEstimate = e.totalLines || 0;
+    let processedInSession = 0;
+    let reader = null;
+    let pool = null;
+    let seqNext = 0, seqCommit = 0;
+    let dispatched = 0, completed = 0;
+    const pending = new Map();
+    const BATCH = 32;
+    const WORKERS = workerCountForBrute();
+    const WINDOW = WORKERS * 2;
 
     try {
       sessionStats.startTs = sessionStats.startTs || Date.now();
       sessionStats.lastTs = Date.now();
       sessionStats.lastCount = sessionStats.candidates;
 
-      while (true) {
-        if (stopped || skipCurrent) {
-          e.progress = totalEstimate > 0 ? (lineNo / totalEstimate) * 100 : e.progress;
-          e.line = lineNo;
-          e.status = skipCurrent ? "new" : "paused";
-          e.lastCheckpoint = Date.now();
-          await saveEntry(e);
-          return skipCurrent ? "skipped" : "paused";
-        }
+      const cfg = walletHotRuntime ? walletHotRuntime.cfg : readWalletConfig();
+      const verifier = walletHotRuntime ? walletHotRuntime.verifier : await getWalletVerifier();
+      const wasm = walletHotRuntime ? walletHotRuntime.wasm : await initEvpWasm();
+      const stream = await createLineStream(e, lineNo);
+      reader = stream.getReader();
+      pool = new WalletEvpWorkerPool(getEmbeddedWasmBytes(), {salt:cfg.salt,iter:cfg.iter}, WORKERS);
+      pool.configure(cfg.salt, cfg.iter);
+      activeDictionaryPool = pool;
+      await pool.init();
+      log(`⚡ Parallel SLDB: ${WORKERS} Worker × WASM, batch ${BATCH}, очередь ${WINDOW} batch; AES/secp256k1 и checkpoint — основной поток.`);
 
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const candidate = value == null ? "" : String(value);
-        lineNo++;
-        processedInSession++;
-        sessionStats.candidates++;
-
-        // Paint the live candidate only occasionally; DOM work for every line
-        // can be more expensive than the crypto itself on an iPhone.
-        const startedCandidateAt = performance.now();
-        if (processedInSession <= 2 || performance.now() - lastLivePaint > 220) {
-          lastLivePaint = performance.now();
-          $("progressText").textContent = `● ${e.name} • проверяется строка ${fmt(lineNo)}…`;
-          $("currentInfo").textContent = `Строка: ${fmt(lineNo)}\nКандидат: ${candidate}\nПрофиль: ${PS.name}`;
-        }
-
-        const result = await checkCandidateDetailed(candidate);
-        const candidateMs = performance.now() - startedCandidateAt;
-        if (candidateMs > 1000) log(`Медленная проверка: строка ${fmt(lineNo)} заняла ${(candidateMs/1000).toFixed(2)} с.`);
-        if ((processedInSession % PS.uiEvery) === 0 || processedInSession <= 2 || performance.now() - lastLivePaint > 250) {
-          const elapsed = Math.max(0.001, (Date.now() - sessionStats.startTs) / 1000);
-          const speed = Math.round(processedInSession / elapsed);
-          updateLiveProgress(e, lineNo, processedInSession);
-          updateRowProgress(e);
-          $("bruteInfo").textContent = `Текущий: ${candidate}\nСкорость: ${fmt(speed)}/с`;
-          lastLivePaint = performance.now();
-        }
-        await adaptiveYield(PS.batchMs);
-        if (result.status === "valid") {
-          foundCandidate = candidate;
-          appState = "FOUND";
-          await idbPut(META_STORE, scopedMetaKey("found"), {candidate, source:e.name, timestamp:Date.now()});
-          showFound(candidate, e.name);
-          e.status = "done";
-          e.progress = 100;
-          e.line = lineNo;
-          e.lastCheckpoint = Date.now();
-          await saveEntry(e);
-          stopped = true;
-          return "found";
-        }
-        if (result.status === "unknown" && $("targetMode").value === "wallet") {
-          walletUnknownReason = result.reason;
-        }
-
-        if ((lineNo % CHECKPOINT_EVERY) === 0) {
-          if (totalEstimate <= 0 && e.usize > 0) {
-            const avg = Math.max(1, e.usize / Math.max(lineNo, 1));
-            totalEstimate = Math.max(lineNo, Math.floor(e.usize / Math.max(avg, 8)));
-            e.totalLines = totalEstimate;
+      let eof = false;
+      const fillWindow = async () => {
+        while (!bruteLikeStopped() && !eof && (dispatched - completed) < WINDOW) {
+          const items = [];
+          while (items.length < BATCH && !bruteLikeStopped() && !eof) {
+            const got = await reader.read();
+            if (got.done) { eof = true; break; }
+            const cand = got.value == null ? "" : String(got.value);
+            const itemLine = lineNo + seqNext + 1;
+            items.push({seq:seqNext++, idx:String(itemLine), cand});
           }
-          e.line = lineNo;
-          e.progress = totalEstimate > 0 ? Math.min(99.9, (lineNo / totalEstimate) * 100) : 0;
-          e.lastCheckpoint = Date.now();
-          await saveEntry(e);
-          updateLiveProgress(e, lineNo, processedInSession);
-          updateRowProgress(e);
-          await new Promise(r => setTimeout(r, 0));
+          if (items.length) { pool.submit(items); dispatched++; }
         }
+      };
+      const processCommitted = async (result) => {
+        for (const item of result.items) pending.set(item.seq, item);
+        while (pending.has(seqCommit)) {
+          const item = pending.get(seqCommit);
+          pending.delete(seqCommit);
+          seqCommit++;
+          if (bruteLikeStopped()) return false;
+
+          const dk = {key:new Uint8Array(item.key), iv:new Uint8Array(item.iv)};
+          let plain = null;
+          try { plain = await aesCbcDecrypt(dk.key, dk.iv, cfg.cipher); } catch (_) {}
+          let hit = false;
+          if (plain && plain.length === 32) {
+            try { hit = (await validateBitcoinCkeyCached(plain, verifier)).status === "valid"; } catch (_) {}
+          }
+
+          processedInSession++;
+          sessionStats.candidates++;
+          lineNo = Number(item.idx);
+
+          if (processedInSession <= 2 || performance.now() - lastLivePaint > 220) {
+            lastLivePaint = performance.now();
+            e.line = lineNo;
+            e.progress = totalEstimate > 0 ? Math.min(99.9, (lineNo / totalEstimate) * 100) : e.progress;
+            $("progressText").textContent = `● ${e.name} • проверяется строка ${fmt(lineNo)}…`;
+            $("currentInfo").textContent = `Строка: ${fmt(lineNo)}\nКандидат: ${item.cand}\nПрофиль: ${PS.name}\n⚡ ${WORKERS} Worker`;
+          }
+
+          if ((processedInSession % PS.uiEvery) === 0) {
+            updateLiveProgress(e, lineNo, processedInSession);
+            updateRowProgress(e);
+            const elapsed = Math.max(.001, (Date.now() - sessionStats.startTs) / 1000);
+            const speed = Math.round(processedInSession / elapsed);
+            $("bruteInfo").textContent = `Текущий: ${item.cand}\nСкорость: ${fmt(speed)}/с\n⚡ SLDB ${WORKERS}W`;
+            await adaptiveYield(PS.batchMs);
+          }
+
+          if (hit) {
+            foundCandidate = item.cand;
+            appState = "FOUND";
+            await idbPut(META_STORE, scopedMetaKey("found"), {candidate:item.cand, source:e.name, timestamp:Date.now()});
+            showFound(item.cand, e.name);
+            e.status = "done";
+            e.progress = 100;
+            e.line = lineNo;
+            e.lastCheckpoint = Date.now();
+            await saveEntry(e);
+            bruteLikeStop();
+            return false;
+          }
+
+          if ((processedInSession % PS.checkpointEvery) === 0) {
+            e.line = lineNo;
+            e.progress = totalEstimate > 0 ? Math.min(99.9, (lineNo / totalEstimate) * 100) : 0;
+            e.lastCheckpoint = Date.now();
+            await saveEntry(e);
+            await idbPut(META_STORE, scopedMetaKey("dict-parallel"), {line:lineNo, timestamp:Date.now()});
+            updateLiveProgress(e, lineNo, processedInSession);
+            updateRowProgress(e);
+          }
+        }
+        return true;
+      };
+
+      while (!eof || completed < dispatched) {
+        if (bruteLikeStopped()) break;
+        await fillWindow();
+        if (completed >= dispatched) { if (eof) break; await yieldToBrowser(); continue; }
+        const result = await pool.nextResult();
+        if (!result || result.type === "closed") break;
+        completed++;
+        if (!await processCommitted(result)) break;
+      }
+
+      if (bruteLikeStopped()) {
+        e.line = lineNo;
+        e.progress = totalEstimate > 0 ? Math.min(99.9, (lineNo / totalEstimate) * 100) : e.progress;
+        e.status = foundCandidate ? "done" : (skipCurrent ? "new" : "paused");
+        e.lastCheckpoint = Date.now();
+        await saveEntry(e);
+        return foundCandidate ? "found" : (skipCurrent ? "skipped" : "paused");
       }
 
       e.line = lineNo;
@@ -1611,14 +1863,98 @@ Checkpoint: не изменён`
       updateRowProgress(e);
       return "done";
     } catch (err) {
+      if (bruteLikeStopped() && !foundCandidate) {
+        e.line = lineNo;
+        e.progress = totalEstimate > 0 ? Math.min(99.9, (lineNo / totalEstimate) * 100) : e.progress;
+        e.status = skipCurrent ? "new" : "paused";
+        e.lastCheckpoint = Date.now();
+        await saveEntry(e);
+        return skipCurrent ? "skipped" : "paused";
+      }
       e.status = "error";
       e.line = lineNo;
       e.lastCheckpoint = Date.now();
       await saveEntry(e);
       throw err;
     } finally {
-      try { await reader.cancel(); } catch (_) {}
-      try { reader.releaseLock(); } catch (_) {}
+      if (reader) { try { await reader.cancel(); } catch (_) {} try { reader.releaseLock(); } catch (_) {} }
+      if (pool) { try { pool.close(); } catch (_) {} }
+      if (activeDictionaryPool === pool) activeDictionaryPool = null;
+    }
+
+    function bruteLikeStopped() { return stopped || skipCurrent; }
+    function bruteLikeStop() { stopped = true; }
+  }
+
+  async function processEntry(e) {
+    if ($("targetMode").value === "wallet" && typeof Worker === "function" && typeof Blob === "function" && typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
+      try { return await processEntryParallelWallet(e); }
+      catch (err) {
+        if (stopped || skipCurrent) throw err;
+        log("⚠ Parallel SLDB недоступен/завершился с ошибкой: " + (err.message || String(err)) + ". Возврат к обычному режиму.");
+      }
+    }
+
+    e.status = "running";
+    e.lastCheckpoint = Date.now();
+    await saveEntry(e);
+    render();
+    let lineNo = e.line || 0;
+    const lineStream = await createLineStream(e, lineNo);
+    const reader = lineStream.getReader();
+    let processedInSession = 0;
+    const PS = perfSettings();
+    const CHECKPOINT_EVERY = PS.checkpointEvery;
+    let totalEstimate = e.totalLines || 0;
+    try {
+      sessionStats.startTs = sessionStats.startTs || Date.now();
+      sessionStats.lastTs = Date.now();
+      sessionStats.lastCount = sessionStats.candidates;
+      while (true) {
+        if (stopped || skipCurrent) {
+          e.progress = totalEstimate > 0 ? (lineNo / totalEstimate) * 100 : e.progress;
+          e.line = lineNo; e.status = skipCurrent ? "new" : "paused"; e.lastCheckpoint = Date.now();
+          await saveEntry(e); return skipCurrent ? "skipped" : "paused";
+        }
+        const { done, value } = await reader.read();
+        if (done) break;
+        const candidate = value == null ? "" : String(value);
+        lineNo++; processedInSession++; sessionStats.candidates++;
+        const startedCandidateAt = performance.now();
+        if (processedInSession <= 2 || performance.now() - lastLivePaint > 220) {
+          lastLivePaint = performance.now();
+          $("progressText").textContent = `● ${e.name} • проверяется строка ${fmt(lineNo)}…`;
+          $("currentInfo").textContent = `Строка: ${fmt(lineNo)}\nКандидат: ${candidate}\nПрофиль: ${PS.name}`;
+        }
+        const result = await checkCandidateDetailed(candidate);
+        const candidateMs = performance.now() - startedCandidateAt;
+        if (candidateMs > 1000) log(`Медленная проверка: строка ${fmt(lineNo)} заняла ${(candidateMs/1000).toFixed(2)} с.`);
+        if ((processedInSession % PS.uiEvery) === 0 || processedInSession <= 2 || performance.now() - lastLivePaint > 250) {
+          const elapsed = Math.max(0.001, (Date.now() - sessionStats.startTs) / 1000);
+          const speed = Math.round(processedInSession / elapsed);
+          updateLiveProgress(e, lineNo, processedInSession); updateRowProgress(e);
+          $("bruteInfo").textContent = `Текущий: ${candidate}\nСкорость: ${fmt(speed)}/с`;
+          lastLivePaint = performance.now();
+        }
+        await adaptiveYield(PS.batchMs);
+        if (result.status === "valid") {
+          foundCandidate = candidate; appState = "FOUND";
+          await idbPut(META_STORE, scopedMetaKey("found"), {candidate, source:e.name, timestamp:Date.now()});
+          showFound(candidate, e.name); e.status = "done"; e.progress = 100; e.line = lineNo; e.lastCheckpoint = Date.now();
+          await saveEntry(e); stopped = true; return "found";
+        }
+        if (result.status === "unknown" && $("targetMode").value === "wallet") walletUnknownReason = result.reason;
+        if ((lineNo % CHECKPOINT_EVERY) === 0) {
+          if (totalEstimate <= 0 && e.usize > 0) { const avg = Math.max(1, e.usize / Math.max(lineNo, 1)); totalEstimate = Math.max(lineNo, Math.floor(e.usize / Math.max(avg, 8))); e.totalLines = totalEstimate; }
+          e.line = lineNo; e.progress = totalEstimate > 0 ? Math.min(99.9, (lineNo / totalEstimate) * 100) : 0; e.lastCheckpoint = Date.now();
+          await saveEntry(e); updateLiveProgress(e, lineNo, processedInSession); updateRowProgress(e); await new Promise(r => setTimeout(r, 0));
+        }
+      }
+      e.line = lineNo; e.totalLines = lineNo; e.progress = 100; e.status = "done"; e.lastCheckpoint = Date.now(); await saveEntry(e); updateRowProgress(e); return "done";
+    } catch (err) {
+      e.status = "error"; e.line = lineNo; e.lastCheckpoint = Date.now(); await saveEntry(e); throw err;
+    } finally {
+      try { await reader.cancel(); } catch (_) {} try { reader.releaseLock(); } catch (_) {}
     }
   }
 
@@ -1921,6 +2257,25 @@ Checkpoint: не изменён`
     for (let len = state.len; len <= maxL; len++) {
       const space = n ** BigInt(len);
       let idx = (len === state.len) ? state.idx : 0n;
+      if ($("targetMode").value === "wallet" && typeof Worker === "function" && typeof Blob === "function" && typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
+        try {
+          const pr = await runParallelWalletSegment(chars, n, len, idx, space, processed, total, PS);
+          processed = pr.processed;
+          idx = pr.nextIdx;
+          if (bruteStopped) {
+            await idbPut(META_STORE, scopedMetaKey("brute"), { idx, len, progress: total > 0n ? Number((processed * 10000n) / total) / 100 : 0, nextCandidate: idx.toString(), timestamp: Date.now() });
+            break outer;
+          }
+          state.idx = 0n;
+          continue;
+        } catch (err) {
+          log("⚠ Parallel EVP недоступен/завершился с ошибкой: " + (err.message || String(err)) + ". Возврат к обычному режиму.");
+          if (bruteStopped) {
+            await idbPut(META_STORE, scopedMetaKey("brute"), { idx, len, progress: total > 0n ? Number((processed * 10000n) / total) / 100 : 0, nextCandidate: idx.toString(), timestamp: Date.now() });
+            break outer;
+          }
+        }
+      }
       while (idx < space) {
         if (bruteStopped) {
           await idbPut(META_STORE, scopedMetaKey("brute"), { idx, len, progress: total > 0n ? Number((processed * 10000n) / total) / 100 : 0, nextCandidate: idx.toString(), timestamp: Date.now() });
@@ -2109,7 +2464,7 @@ Checkpoint: не изменён`
   $("exportProgress").onclick = () => exportProgress().catch(err => log("Экспорт: " + (err.message || err)));
   $("importProgress").onclick = () => { $("progressFile").value=""; $("progressFile").click(); };
   $("progressFile").onchange = async () => { const f=$("progressFile").files[0]; if(!f)return; try{await importProgressFile(f);}catch(err){log("Импорт: " + (err.message||err)); alert("Импорт отменён: " + (err.message||err));} };
-  $("pause").onclick = () => { stopped = true; log("Пауза запрошена…"); };
+  $("pause").onclick = () => { stopped = true; if (activeDictionaryPool) activeDictionaryPool.close(); log("Пауза запрошена…"); };
   $("skip").onclick = () => {
     skipCurrent = true;
     stopped = false;
@@ -2136,7 +2491,7 @@ Checkpoint: не изменён`
   };
 
   $("startBrute").onclick = () => runBrute();
-  $("pauseBrute").onclick = () => { bruteStopped = true; };
+  $("pauseBrute").onclick = () => { bruteStopped = true; if (activeBrutePool) activeBrutePool.close(); log("Пауза перебора запрошена…"); };
 
   $("testCandidateBtn").onclick = async () => {
     const cand = $("testCandidate").value;
