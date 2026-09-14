@@ -261,6 +261,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
       </div>
       <div class="grid" style="margin-top:8px">
         <button class="secondary" id="benchmark">⚡ Benchmark первых строк</button>
+        <button class="secondary" id="cryptoDiag">🔬 Диагностика crypto</button>
         <div class="muted" id="benchmarkResult" style="font-size:12px;display:flex;align-items:center">Проверит небольшую выборку без изменения checkpoint.</div>
       </div>
       <div class="live-head" style="margin-top:12px"><span id="liveDot" class="live-dot"></span><span id="liveStatus">Готово к запуску</span></div>
@@ -799,8 +800,10 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
      Calling crypto.subtle.digest() ~49,019 times for every candidate is catastrophically slow
      on iPhone/Safari. A tiny embedded WebAssembly SHA-512 implementation performs the complete
      EVP_BytesToKey chain in one native WebAssembly call. No PBKDF2 approximation is used. */
-  const EVP_WASM_B64 = "AGFzbQEAAAABFgNgA39/fwF/YAV/f39/fwBgA39/fwADBAMAAQIFBAEBAhAGCAF/AUGAjQQLBxcCBm1lbW9yeQIACmV2cF9zaGE1MTIAAQqvEgPHAQEDfwJAIAJFDQACQAJAIAJBB3EiAw0AIAAhBCACIQUMAQsgAkF4cSEFIAAhBANAIAQgAS0AADoAACAEQQFqIQQgAUEBaiEBIANBf2oiAw0ACwsgAkEISQ0AA0AgBCABLQAAOgAAIAQgAS0AAToAASAEIAEtAAI6AAIgBCABLQADOgADIAQgAS0ABDoABCAEIAEtAAU6AAUgBCABLQAGOgAGIAQgAS0ABzoAByAEQQhqIQQgAUEIaiEBIAVBeGoiBQ0ACwsgAAvCAwECfyOAgICAAEGQBGsiBSSAgICAACABQfgBIAFB+AFJGyEGAkAgAUUNACAFQdAAaiAAIAYQgICAgAAaCyAFQdAAaiAGaiACKQAANwAAIAUgBUHQAGogBkEIaiIBEICAgIAAIgUgASAFQdADahCCgICAAAJAIANBAkkNACADQX9qIQEDQCAFQdADakHAACAFQZADahCCgICAACAFQdADakE4aiAFQZADakE4aikDADcDACAFQdADakEwaiAFQZADakEwaikDADcDACAFQdADakEoaiAFQZADakEoaikDADcDACAFQdADakEgaiAFQZADakEgaikDADcDACAFQdADakEYaiAFQZADakEYaikDADcDACAFQdADakEQaiAFQZADakEQaikDADcDACAFIAUpA5gDNwPYAyAFIAUpA5ADNwPQAyABQX9qIgENAAsLIAQgBSkD0AM3AAAgBEEIaiAFKQPYAzcAACAEQShqIAVB0ANqQShqKQMANwAAIARBIGogBUHQA2pBIGopAwA3AAAgBEEYaiAFQdADakEYaikDADcAACAEQRBqIAVB0ANqQRBqKQMANwAAIAVBkARqJICAgIAAC58NBgJ/CH4EfwF+Cn8NfiOAgICAAEGABmsiAySAgICAAAJAAkAgAUGQAWoiBEGAAU8NAEKIkvOd/8z5hOoAIQVCu86qptjQ67O7fyEGQqvw0/Sv7ry3PCEHQvHt9Pilp/2npX8hCELRhZrv+s+Uh9EAIQlCn9j52cKR2oKbfyEKQuv6htq/tfbBHyELQvnC+JuRo7Pw2wAhDAwBC0EAIAFrIQ0g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";
+  const EVP_WASM_B64 = "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";
   let evpWasmPromise = null;
+  let evpWasmSync = null;
+  let walletHotRuntime = null;
   function initEvpWasm() {
     if (evpWasmPromise) return evpWasmPromise;
     evpWasmPromise = (async () => {
@@ -809,27 +812,35 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
       const mod = await WebAssembly.instantiate(bin, {});
       const ex = mod.instance.exports;
       if (!ex.memory || typeof ex.evp_sha512 !== "function") throw new Error("Не удалось инициализировать быстрый EVP-SHA512.");
-      return {instance:mod.instance, memory:ex.memory, evp:ex.evp_sha512, mem:new Uint8Array(ex.memory.buffer)};
+      const ready = {instance:mod.instance, memory:ex.memory, evp:ex.evp_sha512, mem:new Uint8Array(ex.memory.buffer)};
+      evpWasmSync = ready;
+      return ready;
     })();
     return evpWasmPromise;
   }
 
   // Bitcoin Core legacy nDerivationMethod=0 uses EVP_BytesToKey(AES-256-CBC, SHA-512).
   // Web Crypto is used for SHA-512 here to avoid shipping a second independent hash implementation.
-  async function evpBytesToKeySHA512(passwordBytes, salt, count) {
+  function evpBytesToKeySHA512Sync(passwordBytes, salt, count, w) {
     if (!Number.isInteger(count) || count < 1) throw new Error("nDeriveIterations должен быть целым числом >= 1.");
     if (salt.length !== 8) throw new Error("salt Bitcoin Core должен быть ровно 8 байт.");
     if (passwordBytes.length > 248) throw new Error("Пароль слишком длинный для быстрого EVP-движка (максимум 248 UTF-8 байт).");
-    let w;
-    try { w = await initEvpWasm(); } catch (_) { return evpBytesToKeySHA512Fallback(passwordBytes, salt, count); }
-    // The embedded module reserves plenty of linear memory. Calls are synchronous,
-    // so there is no interleaving between two candidate checks.
-    // Keep these buffers well away from the module stack.
+    if (!w) throw new Error("Быстрый EVP-SHA512 ещё не готов.");
     const PASS_PTR = 10000, SALT_PTR = 11024, OUT_PTR = 12048;
     w.mem.set(passwordBytes, PASS_PTR);
     w.mem.set(salt, SALT_PTR);
     w.evp(PASS_PTR, passwordBytes.length, SALT_PTR, count, OUT_PTR);
     return { key: w.mem.slice(OUT_PTR, OUT_PTR + 32), iv: w.mem.slice(OUT_PTR + 32, OUT_PTR + 48) };
+  }
+
+  async function evpBytesToKeySHA512(passwordBytes, salt, count) {
+    if (!Number.isInteger(count) || count < 1) throw new Error("nDeriveIterations должен быть целым числом >= 1.");
+    if (salt.length !== 8) throw new Error("salt Bitcoin Core должен быть ровно 8 байт.");
+    if (passwordBytes.length > 248) throw new Error("Пароль слишком длинный для быстрого EVP-движка (максимум 248 UTF-8 байт).");
+    if (evpWasmSync) return evpBytesToKeySHA512Sync(passwordBytes, salt, count, evpWasmSync);
+    let w;
+    try { w = await initEvpWasm(); } catch (_) { return evpBytesToKeySHA512Fallback(passwordBytes, salt, count); }
+    return evpBytesToKeySHA512Sync(passwordBytes, salt, count, w);
   }
 
   async function evpBytesToKeySHA512Fallback(passwordBytes, salt, count) {
@@ -1134,9 +1145,14 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
     }
 
     if (mode === "wallet") {
-      const cfg = readWalletConfig();
+      // Hot runtime is prepared once per brute-force session. This avoids repeated
+      // DOM parsing and already-resolved async cache lookups on every candidate.
+      const runtime = walletHotRuntime;
+      const cfg = runtime ? runtime.cfg : readWalletConfig();
       const pass = utf8Encoder.encode(String(candidate));
-      const dk = await evpBytesToKeySHA512(pass, cfg.salt, cfg.iter);
+      const dk = runtime && runtime.wasm
+        ? evpBytesToKeySHA512Sync(pass, cfg.salt, cfg.iter, runtime.wasm)
+        : await evpBytesToKeySHA512(pass, cfg.salt, cfg.iter);
       let plainMaster;
       try {
         plainMaster = await aesCbcDecrypt(dk.key, dk.iv, cfg.cipher);
@@ -1146,7 +1162,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
       if (plainMaster.length !== 32) return {status:"invalid", reason:"Расшифрованный CMasterKey должен содержать ровно 32 байта."};
 
       try {
-        const verifier = await getWalletVerifier();
+        const verifier = runtime ? runtime.verifier : await getWalletVerifier();
         return await validateBitcoinCkeyCached(plainMaster, verifier);
       } catch (err) {
         return {status:"unknown", reason:err.message || String(err)};
@@ -1384,6 +1400,114 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
 Checkpoint: не изменён`
       : "";
     log(count ? `Benchmark готов: ${speed.toFixed(1)} кандидата/с, ${count} строк, ${sec.toFixed(2)} с.` : "Benchmark: словарь пуст.");
+  }
+
+  /* ========== CRYPTO DIAGNOSTIC ========== */
+  async function benchmarkCryptoBreakdown() {
+    if (processing || bruteProcessing) {
+      log("Диагностика crypto: сначала остановите текущий поиск.");
+      return;
+    }
+    if ($("targetMode").value !== "wallet") {
+      $("benchmarkResult").textContent = "Диагностика crypto доступна только для режима Wallet.";
+      log("Диагностика crypto: выберите режим Wallet.");
+      return;
+    }
+    try { walletPreflight(); }
+    catch (err) {
+      $("benchmarkResult").textContent = "Wallet: " + (err.message || String(err));
+      return;
+    }
+    const e = entries.find(x => x.selected && x.status !== "done") || entries.find(x => x.selected) || entries[0];
+    if (!e) {
+      $("benchmarkResult").textContent = "Сначала выберите и просканируйте словарь.";
+      return;
+    }
+
+    const SAMPLE = 100;
+    const cfg = readWalletConfig();
+    const verifierWarmup = await getWalletVerifier();
+    void verifierWarmup;
+    const totals = {read:0, encode:0, evp:0, aes:0, verify:0, other:0};
+    let count = 0, invalid = 0, unknown = 0, valid = 0;
+    let reader = null;
+    const started = performance.now();
+    log(`Crypto diagnostic: ${e.name}, ${SAMPLE} кандидатов. Checkpoint не изменяется.`);
+    $("benchmarkResult").textContent = `Диагностика crypto: 0/${SAMPLE}…`;
+
+    try {
+      const stream = await createLineStream(e);
+      reader = stream.getReader();
+      while (count < SAMPLE) {
+        const readStart = performance.now();
+        const {done, value} = await reader.read();
+        totals.read += performance.now() - readStart;
+        if (done) break;
+        const candidate = value == null ? "" : String(value);
+
+        let t = performance.now();
+        const pass = utf8Encoder.encode(String(candidate));
+        totals.encode += performance.now() - t;
+
+        t = performance.now();
+        const dk = await evpBytesToKeySHA512(pass, cfg.salt, cfg.iter);
+        totals.evp += performance.now() - t;
+
+        let plainMaster;
+        t = performance.now();
+        try {
+          plainMaster = await aesCbcDecrypt(dk.key, dk.iv, cfg.cipher);
+        } catch (_) {
+          totals.aes += performance.now() - t;
+          invalid++;
+          count++;
+          continue;
+        }
+        totals.aes += performance.now() - t;
+
+        t = performance.now();
+        let r;
+        try {
+          r = await validateBitcoinCkeyCached(plainMaster, verifierWarmup);
+        } catch (err) {
+          r = {status:"unknown", reason:err.message || String(err)};
+        }
+        totals.verify += performance.now() - t;
+        if (r.status === "valid") valid++;
+        else if (r.status === "unknown") unknown++;
+        else invalid++;
+        count++;
+
+        if ((count & 15) === 0) {
+          $("benchmarkResult").textContent = `Диагностика crypto: ${count}/${SAMPLE}…`;
+          await new Promise(r => setTimeout(r, 0));
+        }
+      }
+    } catch (err) {
+      $("benchmarkResult").textContent = "Ошибка диагностики: " + (err.message || String(err));
+      log("Crypto diagnostic: " + (err.message || String(err)));
+      return;
+    } finally {
+      if (reader) { try { await reader.cancel(); } catch (_) {} try { reader.releaseLock(); } catch (_) {} }
+    }
+
+    const elapsed = Math.max(0.001, performance.now() - started);
+    const avg = k => count ? totals[k] / count : 0;
+    const measuredCrypto = totals.evp + totals.aes + totals.verify + totals.encode;
+    const overhead = Math.max(0, elapsed - measuredCrypto);
+    const speed = count / (elapsed / 1000);
+    const pct = ms => elapsed ? (ms / elapsed * 100).toFixed(1) : "0.0";
+    const lines = [
+      `Crypto diagnostic: ${count} кандидатов, ${speed.toFixed(1)} кандидата/с`,
+      `EVP-SHA512: ${totals.evp.toFixed(1)} ms (${pct(totals.evp)}), avg ${avg("evp").toFixed(2)} ms`,
+      `AES-CBC: ${totals.aes.toFixed(1)} ms (${pct(totals.aes)}), avg ${avg("aes").toFixed(2)} ms`,
+      `secp256k1/verify: ${totals.verify.toFixed(1)} ms (${pct(totals.verify)}), avg ${avg("verify").toFixed(2)} ms`,
+      `UTF-8 + read + overhead: ${(totals.encode + totals.read + overhead).toFixed(1)} ms`,
+      `Результаты: INVALID ${invalid}, UNKNOWN ${unknown}, VALID ${valid}`
+    ];
+    $("benchmarkResult").textContent = lines.slice(0,4).join(" • ");
+    $("bruteInfo").textContent = lines.join("\n") + "\nCheckpoint: не изменён";
+    log(lines.join(" | "));
   }
 
   /* ========== PROCESS ONE DICTIONARY ========== */
@@ -1744,6 +1868,25 @@ Checkpoint: не изменён`
     bruteProcessing = true;
     bruteStopped = false;
     sessionStats.startTs = Date.now();
+    // Prepare all immutable wallet state before entering the hot candidate loop.
+    // The cryptographic operations themselves are unchanged.
+    if ($("targetMode").value === "wallet") {
+      try {
+        const hotCfg = readWalletConfig();
+        const hotVerifier = await getWalletVerifier();
+        const hotWasm = evpWasmSync || await initEvpWasm();
+        walletHotRuntime = {cfg:hotCfg, verifier:hotVerifier, wasm:hotWasm};
+      } catch (err) {
+        walletHotRuntime = null;
+        bruteProcessing = false;
+        appState = "IDLE";
+        log("Wallet: не удалось подготовить быстрый crypto runtime: " + (err.message || String(err)));
+        render();
+        return;
+      }
+    } else {
+      walletHotRuntime = null;
+    }
     sessionStats.candidates = 0;
     if (appState !== "FOUND") foundCandidate = null;
     appState = "RUNNING";
@@ -1961,6 +2104,7 @@ Checkpoint: не изменён`
 
   $("start").onclick = () => runQueue();
   $("benchmark").onclick = () => benchmarkSelected();
+  $("cryptoDiag").onclick = () => benchmarkCryptoBreakdown();
   $("cryptoSelfTest").onclick = () => runCryptoSelfTest();
   $("exportProgress").onclick = () => exportProgress().catch(err => log("Экспорт: " + (err.message || err)));
   $("importProgress").onclick = () => { $("progressFile").value=""; $("progressFile").click(); };
