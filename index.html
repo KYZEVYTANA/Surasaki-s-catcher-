@@ -155,6 +155,18 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
           <option value="max">Максимум — мощное устройство</option>
         </select>
       </div>
+      <div>
+        <label>Количество Worker</label>
+        <select id="workerCount">
+          <option value="0" selected>Авто — по CPU</option>
+          <option value="1">1 Worker</option><option value="2">2 Worker</option>
+          <option value="3">3 Worker</option><option value="4">4 Worker</option>
+          <option value="5">5 Worker</option><option value="6">6 Worker</option>
+          <option value="7">7 Worker</option><option value="8">8 Worker</option>
+          <option value="9">9 Worker</option><option value="10">10 Worker</option>
+        </select>
+        <div class="muted" style="font-size:11px;margin-top:4px">Авто ограничивается текущим CPU; ручной выбор 1–10 используется напрямую.</div>
+      </div>
     </div>
     <div class="row" style="margin-top:8px;align-items:center">
       <button class="secondary" id="cryptoSelfTest">🧪 Проверить криптографию</button>
@@ -179,6 +191,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
       <input type="file" id="walletFile" accept=".dat,.wallet,application/octet-stream">
       <div class="muted" id="walletFileStatus" style="margin-top:6px;font-size:12px">Файл не загружен. Разбор выполняется локально.</div>
       <div id="walletSessionInfo" class="mono" style="margin-top:6px;font-size:12px"></div>
+      <div id="walletAnalysis" class="mono" style="margin-top:8px;font-size:11px;white-space:pre-wrap"></div>
       <div class="row" style="margin-top:8px">
         <button class="secondary" id="exportProgress">⬇ Экспорт прогресса</button>
         <button class="secondary" id="importProgress">⬆ Импорт прогресса</button><div id="progressSecurityNote" class="muted" style="margin-top:6px;font-size:11px">Экспорт может содержать найденный пароль в открытом JSON.</div>
@@ -262,6 +275,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
       <div class="grid" style="margin-top:8px">
         <button class="secondary" id="benchmark">⚡ Benchmark первых строк</button>
         <button class="secondary" id="cryptoDiag">🔬 Диагностика crypto</button>
+        <button class="secondary" id="workerBenchmark">🧪 Benchmark Worker 1–10</button>
         <div class="muted" id="benchmarkResult" style="font-size:12px;display:flex;align-items:center">Проверит небольшую выборку без изменения checkpoint.</div>
       </div>
       <div class="live-head" style="margin-top:12px"><span id="liveDot" class="live-dot"></span><span id="liveStatus">Готово к запуску</span></div>
@@ -347,7 +361,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
   // access it from loadWalletDat() and the candidate-check hot loop.
   let walletVerifierCache = {key:null, verifier:null};
   let walletSession = { id:null, name:"", size:0, lastModified:0, hash:"", mkeyId:null, ckeyCount:0 };
-  const APP_VERSION = "1.10";
+  const APP_VERSION = "1.12";
   const utf8Encoder = new TextEncoder();
   const sldbUtf8Decoder = new TextDecoder("utf-8", {fatal:true});
   let logLines = [];
@@ -909,10 +923,10 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
   }
 
   function workerCountForBrute() {
+    const selected = Number($("workerCount")?.value || 0);
     const hc = Number(navigator.hardwareConcurrency) || 2;
-    // Four workers is a deliberate mobile ceiling: on iPhone/Safari it avoids
-    // turning the UI into a context-switching/thermal experiment.
-    return Math.max(2, Math.min(4, Math.floor(hc)));
+    if (Number.isInteger(selected) && selected >= 1 && selected <= 10) return selected;
+    return Math.max(2, Math.min(10, Math.floor(hc)));
   }
 
   function getEmbeddedWasmBytes() {
@@ -1175,13 +1189,17 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
 
     const mkeys = [];
     const ckeys = [];
+    const ckeyAs = [];
+    const recordTypes = Object.create(null);
+    let hdchainCount = 0, keyCount = 0, keyMetaCount = 0, nameCount = 0, txCount = 0;
     const pageCount = a.length / pageSize;
+    const td = new TextDecoder();
     for (let pageNo=1; pageNo<pageCount; pageNo++) {
       const base = pageNo * pageSize;
       const page = a.slice(base, base+pageSize);
       if (readU32LE(page,8) !== pageNo) continue;
       const type = page[25];
-      if (type !== 5 && type !== 13) continue; // B-tree leaf / hash leaf
+      if (type !== 5 && type !== 13) continue;
       const entries = readU16LE(page,20);
       if (!entries || (entries & 1)) continue;
       if (26 + entries*2 > pageSize) continue;
@@ -1198,21 +1216,20 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
         const d = bdbItem(page, offs[i+1], pageSize);
         if (!k || !d || k.deleted || d.deleted) continue;
         const kd = k.data, dd = d.data;
-        let pos=0;
-        let cs;
+        let pos=0, cs;
         try { cs=compactSizeRead(kd,pos); } catch (_) { continue; }
         const keyLen=cs.value; pos=cs.next;
-        if (keyLen > 64 || pos+keyLen > kd.length) continue;
-        const keyType = new TextDecoder().decode(kd.slice(pos,pos+keyLen));
+        if (keyLen > 128 || pos+keyLen > kd.length) continue;
+        const keyType = td.decode(kd.slice(pos,pos+keyLen));
         pos += keyLen;
+        recordTypes[keyType] = (recordTypes[keyType] || 0) + 1;
         if (keyType === "mkey") {
           if (pos+4 > kd.length) continue;
           const id=readU32LE(kd,pos);
-          let q=0;
-          let v;
+          let q=0, v;
           try { v=compactSizeRead(dd,q); } catch (_) { continue; }
           const cipherLen=v.value; q=v.next;
-          if (cipherLen < 16 || cipherLen > 1024 || q+cipherLen > dd.length) continue;
+          if (cipherLen < 16 || cipherLen > 4096 || q+cipherLen > dd.length) continue;
           const cipher=dd.slice(q,q+cipherLen); q+=cipherLen;
           try { v=compactSizeRead(dd,q); } catch (_) { continue; }
           const saltLen=v.value; q=v.next;
@@ -1221,10 +1238,8 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
           if (q+8 > dd.length) continue;
           const method=readU32LE(dd,q); q+=4;
           const iter=readU32LE(dd,q); q+=4;
-          try { v=compactSizeRead(dd,q); } catch (_) { continue; }
-          if (q+v.value > dd.length) continue;
           mkeys.push({id,cipher,salt,method,iter});
-        } else if (keyType === "ckey") {
+        } else if (keyType === "ckey" || keyType === "ckeyA") {
           let v;
           try { v=compactSizeRead(kd,pos); } catch (_) { continue; }
           const pubLen=v.value; pos=v.next;
@@ -1233,30 +1248,99 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
           let q=0;
           try { v=compactSizeRead(dd,q); } catch (_) { continue; }
           const cipherLen=v.value; q=v.next;
-          if (cipherLen < 16 || cipherLen > 1024 || q+cipherLen > dd.length) continue;
-          ckeys.push({pub, cipher:dd.slice(q,q+cipherLen)});
+          if (cipherLen < 16 || cipherLen > 4096 || q+cipherLen > dd.length) continue;
+          const item={pub, cipher:dd.slice(q,q+cipherLen), type:keyType};
+          if (keyType === "ckey") ckeys.push(item); else ckeyAs.push(item);
+        } else if (keyType === "hdchain") {
+          hdchainCount++;
+        } else if (keyType === "key") {
+          keyCount++;
+        } else if (keyType === "keymeta") {
+          keyMetaCount++;
+        } else if (keyType === "name") {
+          nameCount++;
+        } else if (keyType === "tx") {
+          txCount++;
         }
       }
     }
-    if (!mkeys.length) throw new Error("В wallet.dat не найдено ни одной записи mkey.");
+
+    const analysis = {
+      format: "Berkeley DB wallet",
+      dbVersion: version,
+      pageSize,
+      pageCount,
+      mkeyCount: mkeys.length,
+      ckeyCount: ckeys.length,
+      ckeyACount: ckeyAs.length,
+      hdchainCount,
+      keyCount,
+      keyMetaCount,
+      nameCount,
+      txCount,
+      recordTypes,
+      encryption: mkeys.length ? "master-key records detected" : (ckeyAs.length || ckeys.length ? "encrypted-key records detected" : "not detected"),
+      compatibility: (mkeys.length && ckeys.length && mkeys[0].method === 0) ? "supported existing legacy handler" : (mkeys.length || ckeys.length || ckeyAs.length ? "partially detected; crypto scheme/structure not fully supported" : "no supported encrypted-wallet structure detected")
+    };
+
+    if (!mkeys.length) {
+      return {mkey:null, ckeys, ckeyAs, mkeys, root, pageSize, pageCount, analysis};
+    }
     const mk=mkeys[0];
-    if (mk.method !== 0) throw new Error("Найден mkey с nDerivationMethod="+mk.method+". Текущий режим поддерживает только method=0.");
     if (mk.salt.length !== 8 || mk.cipher.length % 16 !== 0) throw new Error("Найден mkey с некорректными salt/ciphertext.");
     if (!Number.isSafeInteger(mk.iter) || mk.iter < 1) throw new Error("Найден mkey с некорректным nDeriveIterations.");
-    if (!ckeys.length) throw new Error("mkey найден, но записи ckey с public key не найдены; строгая проверка пароля невозможна.");
-    return {mkey:mk, ckeys, root, pageSize, pageCount};
+    return {mkey:mk, ckeys, ckeyAs, mkeys, root, pageSize, pageCount, analysis};
   }
 
+  function renderWalletAnalysis(analysis) {
+    const el=$("walletAnalysis");
+    if (!el || !analysis) return;
+    const supported = analysis.compatibility === "supported existing legacy handler";
+    const lines = [
+      "Wallet Analyzer",
+      "Format: " + analysis.format,
+      "BDB version: " + analysis.dbVersion + " • page: " + analysis.pageSize,
+      "Encryption: " + analysis.encryption,
+      "mkey: " + analysis.mkeyCount,
+      "ckey!: " + analysis.ckeyCount + " • ckeyA: " + analysis.ckeyACount,
+      "hdchain: " + analysis.hdchainCount + " • key: " + analysis.keyCount + " • keymeta: " + analysis.keyMetaCount,
+      "Compatibility: " + analysis.compatibility
+    ];
+    if (analysis.mkeyCount > 1) lines.push("⚠ Обнаружено несколько mkey; текущий crypto handler использует первый совместимый mkey.");
+    if (analysis.ckeyACount) lines.push("⚠ Обнаружен альтернативный тип encrypted-key записи ckeyA; отдельная криптографическая поддержка не включена.");
+    if (!analysis.mkeyCount && !analysis.ckeyCount && !analysis.ckeyACount) lines.push("⚠ Зашифрованная структура wallet не обнаружена; encrypted-wallet verifier не запускается.");
+    el.textContent=lines.join("\n");
+    el.style.color = supported ? "" : "#b45309";
+  }
+
+
   async function loadWalletDat(file) {
-    const status=$('walletFileStatus');
+    const status=$("walletFileStatus");
     if (!file) return;
     try {
       status.textContent = "Чтение wallet.dat…";
       const buffer = await file.arrayBuffer();
       const walletHash = hexOf(await sha256Bytes(new Uint8Array(buffer)));
-      const parsed = parseBitcoinWalletDat(buffer);
+      let parsed;
+      try {
+        parsed = parseBitcoinWalletDat(buffer);
+      } catch (parseErr) {
+        // Keep unknown/non-BDB .dat files diagnosable instead of pretending they are legacy wallets.
+        const text = new TextDecoder("utf-8", {fatal:false}).decode(new Uint8Array(buffer.slice(0, Math.min(buffer.byteLength, 4096))));
+        const printable = (text.match(/[\\x20-\\x7E]{4,}/g) || []).slice(0,8);
+        $("walletAnalysis").textContent = "Wallet Analyzer\nFormat: Unknown / unsupported\nReason: " + (parseErr.message || String(parseErr)) + (printable.length ? "\nText signatures: " + printable.join(" | ") : "");
+        $("walletAnalysis").style.color="#b45309";
+        throw parseErr;
+      }
+      renderWalletAnalysis(parsed.analysis);
+      if (!parsed.mkey || !parsed.ckeys.length) {
+        throw new Error("Формат распознан, но текущий encrypted-wallet verifier не поддерживает эту структуру.");
+      }
       const mk=parsed.mkey;
       const ck=parsed.ckeys[0];
+      if (mk.method !== 0) {
+        throw new Error("mkey обнаружен, но nDerivationMethod="+mk.method+" не поддерживается текущим crypto handler.");
+      }
       $("mkeyCipher").value=hexOf(mk.cipher);
       $("mkeySalt").value=hexOf(mk.salt);
       $("mkeyIter").value=String(mk.iter);
@@ -1272,7 +1356,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
       status.textContent = `Загружен ${file.name}: mkey #${mk.id}, ckey=${parsed.ckeys.length}. SHA-256: ${walletHash.slice(0,16)}…`;
       $("walletSessionInfo").textContent = `Сессия wallet: ${walletHash}\nРазмер: ${fmtBytes(file.size)} • mkey #${mk.id} • ckey: ${parsed.ckeys.length}`;
       await loadSessionMeta();
-      log(`Wallet: ${file.name}, SHA-256=${walletHash}, mkey #${mk.id}, ckey=${parsed.ckeys.length}, iterations=${mk.iter}.`);
+      log(`Wallet: ${file.name}, SHA-256=${walletHash}, mkey #${mk.id}, mkey count=${parsed.mkeys.length}, ckey=${parsed.ckeys.length}, ckeyA=${parsed.ckeyAs.length}, iterations=${mk.iter}.`);
       render();
     } catch (err) {
       status.textContent = "Ошибка wallet.dat: " + (err.message || String(err));
@@ -1281,6 +1365,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
       render();
     }
   }
+
 
   function readWalletConfig() {
     const cipherHex = $("mkeyCipher").value.trim();
@@ -1477,7 +1562,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
       entries: entries.map(e=>({key:e.key,name:e.name,selected:!!e.selected,status:e.status||"new",progress:Number(e.progress)||0,line:Number(e.line)||0,totalLines:Number(e.totalLines)||0,lastCheckpoint:Number(e.lastCheckpoint)||0})),
       found: foundCandidate != null ? {found:true,candidate:String(foundCandidate),source:"saved",timestamp:Date.now()} : null,
       brute: null,
-      settings: {targetMode:$("targetMode").value,perfProfile:$("perfProfile").value}
+      settings: {targetMode:$("targetMode").value,perfProfile:$("perfProfile").value,workerCount:$("workerCount")?.value || "0"}
     };
   }
 
@@ -1719,6 +1804,66 @@ Checkpoint: не изменён`
     $("benchmarkResult").textContent = lines.slice(0,4).join(" • ");
     $("bruteInfo").textContent = lines.join("\n") + "\nCheckpoint: не изменён";
     log(lines.join(" | "));
+  }
+
+  /* ========== WORKER SCALING BENCHMARK ========== */
+  async function benchmarkWorkerScaling() {
+    if (processing || bruteProcessing || activeDictionaryPool || activeBrutePool) {
+      log("Worker benchmark: сначала остановите текущий поиск.");
+      return;
+    }
+    if ($("targetMode").value !== "wallet") {
+      $("benchmarkResult").textContent = "Worker benchmark доступен только для режима Wallet.";
+      log("Worker benchmark: выберите режим Wallet.");
+      return;
+    }
+    try { walletPreflight(); } catch (err) {
+      $("benchmarkResult").textContent = "Wallet: " + (err.message || String(err));
+      return;
+    }
+    const cfg = readWalletConfig();
+    const SAMPLE = 128;
+    const BATCH = 32;
+    const chars = "benchmark-worker-scaling-0123456789";
+    const itemsBase = Array.from({length:SAMPLE}, (_,i)=>({seq:i,idx:String(i),cand:chars + String(i)}));
+    const results = [];
+    log(`🧪 Worker benchmark: 1–10 Worker × WASM, ${SAMPLE} EVP-кандидатов на конфигурацию. Checkpoint не изменяется.`);
+    $("benchmarkResult").textContent = "Worker benchmark: подготовка…";
+    for (let count=1; count<=10; count++) {
+      if (processing || bruteProcessing) break;
+      let pool=null, dispatched=0, completed=0;
+      const started=performance.now();
+      try {
+        pool=new WalletEvpWorkerPool(getEmbeddedWasmBytes(), {salt:cfg.salt,iter:cfg.iter}, count);
+        pool.configure(cfg.salt,cfg.iter);
+        await pool.init();
+        for (let off=0; off<SAMPLE; off+=BATCH) {
+          pool.submit(itemsBase.slice(off, Math.min(off+BATCH,SAMPLE)));
+          dispatched++;
+        }
+        while (completed<dispatched) {
+          const r=await pool.nextResult();
+          if (!r || r.type==="closed") throw new Error("Worker pool closed");
+          completed++;
+          if ((completed & 3)===0) await yieldToBrowser();
+        }
+        const sec=Math.max(.001,(performance.now()-started)/1000);
+        const speed=SAMPLE/sec;
+        results.push({count,speed});
+        $("benchmarkResult").textContent=`Worker benchmark: ${count}/10 • ${speed.toFixed(1)} кандидата/с`;
+        log(`Worker benchmark: ${count} Worker → ${speed.toFixed(1)} кандидата/с (${sec.toFixed(2)} с)`);
+      } catch (err) {
+        results.push({count,speed:0,error:err.message||String(err)});
+        log(`Worker benchmark: ${count} Worker → ERROR: ${err.message||String(err)}`);
+      } finally {
+        if (pool) { try { pool.close(); } catch (_) {} }
+      }
+    }
+    if (!results.length) return;
+    const best=results.filter(x=>x.speed>0).sort((a,b)=>b.speed-a.speed)[0];
+    const lines=results.map(x=>x.speed>0 ? `${x.count}W: ${x.speed.toFixed(1)}/с` : `${x.count}W: ERROR`);
+    $("benchmarkResult").textContent=`Лучший: ${best ? `${best.count} Worker, ${best.speed.toFixed(1)}/с` : "нет результата"} • ${lines.join(" • ")}`;
+    log(`🧪 Worker benchmark завершён. Лучший результат: ${best ? `${best.count} Worker — ${best.speed.toFixed(1)} кандидата/с` : "нет"}.`);
   }
 
   /* ========== PROCESS ONE DICTIONARY ========== */
@@ -2460,6 +2605,7 @@ Checkpoint: не изменён`
   $("start").onclick = () => runQueue();
   $("benchmark").onclick = () => benchmarkSelected();
   $("cryptoDiag").onclick = () => benchmarkCryptoBreakdown();
+  $("workerBenchmark").onclick = () => benchmarkWorkerScaling();
   $("cryptoSelfTest").onclick = () => runCryptoSelfTest();
   $("exportProgress").onclick = () => exportProgress().catch(err => log("Экспорт: " + (err.message || err)));
   $("importProgress").onclick = () => { $("progressFile").value=""; $("progressFile").click(); };
