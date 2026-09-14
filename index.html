@@ -8,131 +8,150 @@
 <title>Surasaki’s Matcher — powered by Zevy</title>
 <style>
 :root {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", system-ui, sans-serif;
   color-scheme: dark;
-  --bg: #0b0b0e;
-  --card: #17171c;
-  --border: #292930;
-  --muted: #999;
-  --accent: #eee;
-  --ok: #3dd68c;
-  --run: #5b9dff;
-  --err: #ff6b6b;
-  --paused: #f0c14b;
+  --bg: #0a1018;
+  --bg2: #0d1520;
+  --card: rgba(17, 27, 39, .94);
+  --card-2: rgba(11, 19, 29, .92);
+  --border: #223445;
+  --border-strong: #315066;
+  --text: #eaf7fb;
+  --muted: #8fa7b5;
+  --accent: #00e5ff;
+  --accent-text: #061217;
+  --blue: #00d9ff;
+  --green: #00f5a0;
+  --red: #ff4f7b;
+  --yellow: #ffc857;
+  --violet: #9b6dff;
+  --orange: #ff9f43;
+  --glow: rgba(0,229,255,.18);
+  --radius: 16px;
+  --control-h: 44px;
+}
+html[data-theme="light"] {
+  color-scheme: light;
+  --bg: #e7eef2;
+  --bg2: #dce7ec;
+  --card: rgba(247,250,251,.96);
+  --card-2: rgba(232,240,244,.94);
+  --border: #c5d5dd;
+  --border-strong: #9fb8c4;
+  --text: #14222c;
+  --muted: #5c707c;
+  --accent: #008eae;
+  --accent-text: #f7fdff;
+  --blue: #008eae;
+  --green: #008f68;
+  --red: #d7375d;
+  --yellow: #a56b00;
+  --violet: #6844d9;
+  --orange: #c66a00;
+  --glow: rgba(0,142,174,.15);
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: #eee; -webkit-text-size-adjust: 100%; }
-main { max-width: 920px; margin: auto; padding: 12px 14px 40px; }
-.card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 14px 16px;
-  margin: 10px 0;
+html { background: var(--bg); }
+body {
+  margin: 0; background:
+    radial-gradient(circle at 8% 0%, rgba(0,229,255,.08), transparent 27%),
+    radial-gradient(circle at 92% 10%, rgba(155,109,255,.07), transparent 25%),
+    var(--bg);
+  color: var(--text); -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: transparent;
 }
-h1 { font-size: 22px; margin: 0 0 2px; font-weight: 700; }
-h2 { font-size: 15px; margin: 0 0 10px; font-weight: 600; letter-spacing: 0.02em; }
+html[data-theme="light"] body { background: radial-gradient(circle at 8% 0%, rgba(0,142,174,.08), transparent 28%), var(--bg); }
+main { max-width: 980px; margin: auto; padding: 14px 14px 44px; }
+main > .card:first-child {
+  padding: 20px 20px 17px; border-color: var(--border-strong);
+  background: linear-gradient(135deg, var(--card), var(--card-2));
+  box-shadow: 0 0 0 1px rgba(0,229,255,.035), 0 14px 38px rgba(0,0,0,.12);
+  position: relative; overflow: hidden;
+}
+main > .card:first-child::after { content:""; position:absolute; inset:auto -10% -60% 45%; height:140px; background:radial-gradient(circle, var(--glow), transparent 65%); pointer-events:none; }
+h1 { font-size: 24px; line-height: 1.15; margin: 0 0 5px; font-weight: 800; letter-spacing: -.025em; }
+h2 { font-size: 15px; line-height: 1.2; margin: 0 0 11px; font-weight: 760; letter-spacing: .01em; }
 .muted, small { color: var(--muted); font-size: 13px; }
-.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
-button, input, select, textarea {
-  font: inherit; border-radius: 11px; border: 1px solid #3b3b45;
-  background: #0e0e12; color: #fff; padding: 11px 12px; width: 100%;
-}
-button {
-  background: var(--accent); color: #111; font-weight: 700;
-  cursor: pointer; -webkit-tap-highlight-color: transparent;
-}
-button:disabled { opacity: 0.45; cursor: not-allowed; }
-button.secondary { background: #24242b; color: #eee; font-weight: 600; }
-button.danger { background: #3a1a1a; color: #ffb4b4; border-color: #5a2a2a; }
-button.ok { background: #1a3a28; color: #b8f0d0; border-color: #2a5a3a; }
-.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.row > * { flex: 1; min-width: 0; }
-.drop {
-  border: 1.5px dashed #555; padding: 18px 12px; text-align: center;
-  border-radius: 14px; background: #0e0e12;
-}
-table { width: 100%; border-collapse: collapse; }
-td, th {
-  padding: 8px 4px; border-bottom: 1px solid var(--border);
-  text-align: left; font-size: 12.5px; vertical-align: middle;
-}
-th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
-.status { white-space: nowrap; font-weight: 600; }
-.status.ok { color: var(--ok); }
-.status.run { color: var(--run); }
-.status.err { color: var(--err); }
-.status.paused { color: var(--paused); }
-.status.new { color: var(--muted); }
-progress {
-  width: 100%; height: 10px; border-radius: 6px;
-  background: #1a1a20; border: none;
-}
-progress::-webkit-progress-bar { background: #1a1a20; border-radius: 6px; }
-progress::-webkit-progress-value { background: linear-gradient(90deg,#5b9dff,#3dd68c); border-radius: 6px; }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; font-size: 12px; }
-#log {
-  height: 160px; overflow: auto; background: #09090b;
-  border-radius: 10px; padding: 10px; white-space: pre-wrap;
-  font-size: 12px; line-height: 1.45; font-family: ui-monospace, monospace;
-}
-.tabs { display: flex; gap: 4px; margin-bottom: 10px; }
-.tab {
-  flex: 1; text-align: center; padding: 10px 6px; border-radius: 10px;
-  background: #1a1a20; color: var(--muted); font-weight: 600; font-size: 13px;
-  border: 1px solid transparent; cursor: pointer;
-}
-.tab.active { background: #2a2a35; color: #fff; border-color: #3b3b45; }
-.panel { display: none; }
-.panel.active { display: block; }
-.stat-grid {
-  display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
-  margin: 8px 0;
-}
-.stat {
-  background: #0e0e12; border-radius: 10px; padding: 10px 12px;
-  border: 1px solid #222;
-}
-.stat .label { font-size: 11px; color: var(--muted); margin-bottom: 2px; }
-.stat .value { font-size: 16px; font-weight: 700; }
-.warn {
-  background: #2a220a; border: 1px solid #5a4a1a; color: #f0d080;
-  border-radius: 10px; padding: 10px 12px; margin: 8px 0; font-size: 13px;
-}
-.live-dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--run); margin-right:7px; box-shadow:0 0 0 0 rgba(91,157,255,.5); }
-.live-dot.running { animation:pulse 1.4s infinite; }
-@keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(91,157,255,.5)} 70%{box-shadow:0 0 0 8px rgba(91,157,255,0)} 100%{box-shadow:0 0 0 0 rgba(91,157,255,0)} }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin: 10px 0; box-shadow: 0 7px 22px rgba(0,0,0,.08); }
+.grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+.row { display:flex; gap:9px; align-items:center; flex-wrap:wrap; }
+.row > * { flex:1; min-width:0; }
+button,input,select,textarea { font:inherit; min-height:var(--control-h); border-radius:11px; border:1px solid var(--border-strong); background:var(--card-2); color:var(--text); padding:10px 12px; width:100%; outline:none; }
+button { background:linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 78%, #ffffff)); color:var(--accent-text); font-weight:760; cursor:pointer; touch-action:manipulation; transition:transform .12s ease, filter .12s ease, border-color .12s ease, opacity .12s ease; }
+button:active:not(:disabled) { transform:translateY(1px); opacity:.84; }
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible { border-color:var(--accent); box-shadow:0 0 0 3px var(--glow); }
+button:disabled { opacity:.42; cursor:not-allowed; }
+button.secondary { background:var(--card-2); color:var(--text); font-weight:680; }
+button.danger { background:color-mix(in srgb, var(--red) 18%, var(--card)); color:var(--red); border-color:color-mix(in srgb, var(--red) 42%, var(--border)); }
+button.ok { background:color-mix(in srgb, var(--green) 17%, var(--card)); color:var(--green); border-color:color-mix(in srgb, var(--green) 40%, var(--border)); }
+input::placeholder,textarea::placeholder { color:var(--muted); opacity:.72; }
+label { display:block; font-size:12px; color:var(--muted); margin:7px 0 4px; }
+input[type="checkbox"] { width:auto; min-height:0; margin:0 5px 0 0; accent-color:var(--accent); vertical-align:-1px; }
+input[type="file"] { padding:7px 9px; }
+.tabs { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin:10px 0; padding:5px; border:1px solid var(--border); border-radius:15px; background:var(--card-2); position:sticky; top:8px; z-index:10; backdrop-filter:blur(12px); }
+.tab { min-height:52px; display:flex; align-items:center; justify-content:center; text-align:center; padding:9px 7px; border-radius:11px; background:transparent; color:var(--muted); font-weight:760; font-size:12.5px; border:1px solid transparent; cursor:pointer; touch-action:manipulation; }
+.tab.active { color:var(--text); border-color:var(--border-strong); background:linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, var(--card)), var(--card-2)); box-shadow:inset 0 0 18px var(--glow), 0 0 0 1px rgba(0,229,255,.04); }
+.panel { display:none; }
+.panel.active { display:block; }
+.section-kicker { font-size:10px; text-transform:uppercase; letter-spacing:.14em; color:var(--muted); margin:0 0 5px; }
+.section-title { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; }
+.theme-toggle { width:auto; min-height:36px; padding:7px 10px; border-radius:10px; background:var(--card-2); color:var(--text); border-color:var(--border-strong); }
+.settings-profile-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:9px; }
+.profile-btn { text-align:left; min-height:78px; background:var(--card-2); color:var(--text); border-color:var(--border); padding:11px; }
+.profile-btn strong { display:block; font-size:13px; margin-bottom:4px; }
+.profile-btn span { display:block; color:var(--muted); font-size:10.5px; line-height:1.3; font-weight:500; }
+.profile-btn.active { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent), 0 0 18px var(--glow); background:color-mix(in srgb, var(--accent) 9%, var(--card-2)); }
+.profile-btn[data-profile="eco"] strong { color:var(--green); }
+.profile-btn[data-profile="balance"] strong { color:var(--accent); }
+.profile-btn[data-profile="max"] strong { color:#ff4bd8; }
+.engine-badge { display:inline-flex; align-items:center; gap:6px; padding:5px 8px; border:1px solid var(--border); border-radius:999px; color:var(--muted); font-size:10px; }
+.drop { border:1px dashed var(--border-strong); padding:20px 12px; text-align:center; border-radius:14px; background:var(--card-2); }
+.drop input[type="file"] { border-color:var(--border); }
+.stat-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:8px 0; }
+.stat { background:var(--card-2); border-radius:11px; padding:10px 11px; border:1px solid var(--border); min-width:0; }
+.stat .label { font-size:10.5px; color:var(--muted); margin-bottom:3px; }
+.stat .value { font-size:16px; line-height:1.15; font-weight:780; overflow-wrap:anywhere; }
+.status { white-space:nowrap; font-weight:650; }
+.status.ok { color:var(--green); } .status.run { color:var(--blue); } .status.err { color:var(--red); } .status.paused { color:var(--yellow); } .status.new { color:var(--muted); }
+.warn { background:color-mix(in srgb, var(--yellow) 10%, var(--card)); border:1px solid color-mix(in srgb, var(--yellow) 30%, var(--border)); color:var(--yellow); border-radius:10px; padding:10px 12px; margin:8px 0; font-size:13px; }
+.success-box { background:color-mix(in srgb, var(--green) 10%, var(--card)); border:1px solid color-mix(in srgb, var(--green) 32%, var(--border)); color:var(--green); border-radius:10px; padding:12px; margin:8px 0; font-size:13px; }
+progress { width:100%; height:9px; border-radius:6px; background:var(--card-2); border:none; }
+progress::-webkit-progress-bar { background:var(--card-2); border-radius:6px; }
+progress::-webkit-progress-value { background:linear-gradient(90deg,var(--accent),var(--green)); border-radius:6px; }
+.live-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--accent); margin-right:7px; box-shadow:0 0 10px var(--accent); }
+.live-dot.running { animation:pulse 1.5s infinite; }
+@keyframes pulse { 0%,100%{opacity:.55} 50%{opacity:1} }
 .live-head { display:flex; align-items:center; gap:4px; font-size:13px; font-weight:700; }
 .live-metrics { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; margin-top:9px; }
-.live-metric { background:#0e0e12; border:1px solid #222; border-radius:10px; padding:8px; }
-.live-metric b { display:block; font-size:14px; }
-.live-metric span { color:var(--muted); font-size:10px; }
-@media (max-width:650px){.live-metrics{grid-template-columns:1fr 1fr 1fr}.live-metric{padding:7px 6px}}
-.success-box {
-  background: #0a2a18; border: 1px solid #1a5a30; color: #a8f0c0;
-  border-radius: 10px; padding: 12px; margin: 8px 0; font-size: 13px;
-}
-label { display: block; font-size: 12px; color: var(--muted); margin: 6px 0 3px; }
-input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
-.file-list { max-height: 320px; overflow: auto; -webkit-overflow-scrolling: touch; }
-@media (max-width: 650px) {
-  .grid, .grid3 { grid-template-columns: 1fr; }
-  .stat-grid { grid-template-columns: 1fr 1fr; }
-  table { font-size: 11.5px; }
-}
+.live-metric { background:var(--card-2); border:1px solid var(--border); border-radius:10px; padding:8px; }
+.live-metric b { display:block; font-size:14px; } .live-metric span { color:var(--muted); font-size:10px; }
+table { width:100%; border-collapse:collapse; } td,th { padding:8px 5px; border-bottom:1px solid var(--border); text-align:left; font-size:12.5px; vertical-align:middle; } th { color:var(--muted); font-weight:650; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; } tr:last-child td { border-bottom:0; }
+#log { height:240px; overflow:auto; background:var(--card-2); border:1px solid var(--border); border-radius:10px; padding:10px; white-space:pre-wrap; font-size:12px; line-height:1.45; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; -webkit-overflow-scrolling:touch; }
+.mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; word-break:break-all; font-size:12px; }
+.file-list { max-height:320px; overflow:auto; -webkit-overflow-scrolling:touch; }
+details { border-top:1px solid transparent; } details > summary { padding:5px 0; }
+.panel[data-panel-tone="goal"] .card:first-child { border-top-color:color-mix(in srgb,var(--accent) 50%,var(--border)); }
+.panel[data-panel-tone="settings"] .card:first-child { border-top-color:color-mix(in srgb,var(--violet) 50%,var(--border)); }
+.panel[data-panel-tone="work"] .card:first-child { border-top-color:color-mix(in srgb,var(--green) 50%,var(--border)); }
+.panel[data-panel-tone="debug"] .card:first-child { border-top-color:color-mix(in srgb,var(--orange) 50%,var(--border)); }
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+@media (max-width:760px){ main{padding:10px 10px 34px}.card{padding:13px 12px;margin:8px 0}.settings-profile-grid{grid-template-columns:1fr}.stat-grid{grid-template-columns:1fr 1fr} }
+@media (max-width:650px){ .grid,.grid3{grid-template-columns:1fr}.live-metrics{grid-template-columns:repeat(3,1fr)}.live-metric{padding:7px 6px}table{font-size:11.5px}td,th{padding:7px 4px}button,input,select,textarea{min-height:43px}.tabs{top:4px}.tab{min-height:48px;font-size:11px} }
+@media (max-width:390px){ main{padding-left:8px;padding-right:8px}.card{padding:12px 10px}.tab{font-size:10.5px;padding-left:3px;padding-right:3px}.live-metric b{font-size:12px}.live-metric span{font-size:9px} }
 </style>
 </head>
 <body>
 <main>
   <div class="card">
     <h1>Surasaki’s Matcher</h1>
-    <div class="muted">powered by Zevy • локальный менеджер словарей • Safari / iPhone</div>
+    <div class="muted" style="display:flex;align-items:center;justify-content:space-between;gap:10px">powered by Zevy • локальный менеджер словарей • Safari / iPhone <button class="theme-toggle" id="themeToggle" type="button">🌙 Cyber Neon</button></div>
   </div>
 
-  <div class="tabs">
-    <div class="tab active" data-tab="dict">📚 Словари</div>
-    <div class="tab" data-tab="brute">🔢 Перебор</div>
+  <div class="tabs" aria-label="Основная навигация">
+    <div class="tab active" data-tab="goals">🎯 Цель и средства</div>
+    <div class="tab" data-tab="settings">⚙️ Настройка</div>
+    <div class="tab" data-tab="work">🚀 Рабочая зона</div>
+    <div class="tab" data-tab="debug">🔬 Отладка</div>
   </div>
 
   <div class="card compact-target">
@@ -219,7 +238,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
   </div>
 
   <!-- ===================== DICT PANEL ===================== -->
-  <div class="panel active" id="panel-dict">
+  <div class="panel" id="panel-dict">
     <div class="card">
       <h2>Бинарный словарь</h2>
       <div class="drop">
@@ -361,7 +380,7 @@ input[type="checkbox"] { width: auto; margin: 0; accent-color: #5b9dff; }
   // access it from loadWalletDat() and the candidate-check hot loop.
   let walletVerifierCache = {key:null, verifier:null};
   let walletSession = { id:null, name:"", size:0, lastModified:0, hash:"", mkeyId:null, ckeyCount:0 };
-  const APP_VERSION = "1.12";
+  const APP_VERSION = "1.13";
   const utf8Encoder = new TextEncoder();
   const sldbUtf8Decoder = new TextDecoder("utf-8", {fatal:true});
   let logLines = [];
@@ -2501,6 +2520,102 @@ Checkpoint: не изменён`
     if ($("bruteLiveDot")) $("bruteLiveDot").classList.remove("running");
     if ($("bruteLiveStatus")) $("bruteLiveStatus").textContent = foundCandidate ? "Пароль найден" : (bruteStopped ? "Пауза" : "Перебор завершён");
   }
+
+  /* ========== VISUAL SHELL ========== */
+  function setupVisualShell() {
+    const main = document.querySelector("main");
+    const tabs = document.querySelector(".tabs");
+    const targetCard = document.querySelector(".compact-target");
+    const dictPanel = $("panel-dict");
+    const brutePanel = $("panel-brute");
+    const stateCard = $("state")?.closest(".card");
+    if (!main || !tabs || !targetCard || !dictPanel || !brutePanel || !stateCard) return;
+
+    const panels = {};
+    ["goals","settings","work","debug"].forEach((name, i) => {
+      const p = document.createElement("div");
+      p.className = "panel" + (i === 0 ? " active" : "");
+      p.id = "panel-" + name;
+      p.dataset.panelTone = name === "goals" ? "goal" : name;
+      main.insertBefore(p, targetCard);
+      panels[name] = p;
+    });
+
+    // Goal & resources: wallet/target plus dictionary source.
+    panels.goals.appendChild(targetCard);
+    const dictSource = dictPanel.querySelector(":scope > .card:first-child");
+    if (dictSource) panels.goals.appendChild(dictSource);
+
+    // Settings: extract only engine controls from the target card.
+    const targetGrid = targetCard.querySelector(".grid");
+    const perfWrap = $("perfProfile")?.closest("div");
+    const workerWrap = $("workerCount")?.closest("div");
+    const settingsCard = document.createElement("div");
+    settingsCard.className = "card";
+    settingsCard.innerHTML = '<div class="section-kicker">ENGINE</div><div class="section-title"><h2>Профиль производительности</h2><span class="engine-badge">⚡ локально • без сети</span></div>';
+    const profileGrid = document.createElement("div");
+    profileGrid.className = "settings-profile-grid";
+    [
+      ["eco","🟢 Эконом","минимум нагрузки • прохладнее • ниже скорость"],
+      ["balance","⚖️ Баланс","оптимальный режим для iPhone и Safari"],
+      ["max","🔴 Мощность","максимальная производительность движка"]
+    ].forEach(([value,title,desc]) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "profile-btn"; b.dataset.profile = value;
+      b.innerHTML = `<strong>${title}</strong><span>${desc}</span>`;
+      b.onclick = () => { $("perfProfile").value = value; $("perfProfile").dispatchEvent(new Event("change")); syncProfileButtons(); };
+      profileGrid.appendChild(b);
+    });
+    settingsCard.appendChild(profileGrid);
+    const hiddenControls = document.createElement("div");
+    hiddenControls.style.display = "none";
+    if (perfWrap) hiddenControls.appendChild(perfWrap);
+    settingsCard.appendChild(hiddenControls);
+    const workerCard = document.createElement("div");
+    workerCard.className = "card";
+    workerCard.innerHTML = '<div class="section-kicker">PARALLEL ENGINE</div><h2>Количество Worker</h2>';
+    if (workerWrap) { workerWrap.style.display = "block"; workerCard.appendChild(workerWrap); }
+    workerCard.insertAdjacentHTML("beforeend", '<div class="muted" style="margin-top:8px;font-size:11px">Авто подбирает количество Worker по CPU. Ручной режим: 1–10. Для iPhone обычно оптимален диапазон около 3–5, но ориентируйтесь на Benchmark.</div>');
+    panels.settings.append(settingsCard, workerCard);
+
+    // Work: dictionary queue and symbolic brute force.
+    while (dictPanel.firstElementChild) panels.work.appendChild(dictPanel.firstElementChild);
+    while (brutePanel.firstElementChild) panels.work.appendChild(brutePanel.firstElementChild);
+    dictPanel.remove(); brutePanel.remove();
+
+    // Debug: self-test, diagnostics/benchmarks and full journal.
+    const selfTestRow = $("cryptoSelfTest")?.closest(".row");
+    const debugCard = document.createElement("div"); debugCard.className = "card";
+    debugCard.innerHTML = '<div class="section-kicker">CRYPTO / DIAGNOSTICS</div><h2>Проверки и измерения</h2>';
+    if (selfTestRow) debugCard.appendChild(selfTestRow);
+    const benchRow = $("benchmark")?.closest(".grid");
+    if (benchRow) debugCard.appendChild(benchRow);
+    panels.debug.appendChild(debugCard);
+    panels.debug.appendChild(stateCard);
+
+    function syncProfileButtons() {
+      const value = $("perfProfile")?.value || "balance";
+      document.querySelectorAll(".profile-btn").forEach(b => b.classList.toggle("active", b.dataset.profile === value));
+    }
+    syncProfileButtons();
+
+    // Theme persistence. Keep the actual preference separate from app state/checkpoints.
+    const savedTheme = localStorage.getItem("surasaki-theme");
+    if (savedTheme === "light" || savedTheme === "dark") document.documentElement.dataset.theme = savedTheme === "light" ? "light" : "dark";
+    function paintThemeButton() {
+      const dark = document.documentElement.dataset.theme !== "light";
+      $("themeToggle").textContent = dark ? "☀️ Cyber Light" : "🌙 Cyber Neon";
+    }
+    $("themeToggle").onclick = () => {
+      const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+      document.documentElement.dataset.theme = next;
+      localStorage.setItem("surasaki-theme", next);
+      paintThemeButton();
+    };
+    paintThemeButton();
+  }
+
+  setupVisualShell();
 
   /* ========== EVENT HANDLERS ========== */
   // Tabs
